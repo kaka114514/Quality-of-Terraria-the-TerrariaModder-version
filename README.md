@@ -1,6 +1,7 @@
 # Quality of Terraria 更好的体验
 
 移植自tModLoader MOD 更好的体验https://github.com/487666123/ImproveGame
+
 让收纳、建造和探索方便一些的 Terraria 模组。当前版本 **v1.0.0**，适用于 **Terraria 1.4.5.8、TerrariaModder 0.4.1**。
 
 ## 安装与设置
