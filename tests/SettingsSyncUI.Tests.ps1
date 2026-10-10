@@ -8,11 +8,11 @@ using System.Reflection;
 using System.Reflection.Emit;
 namespace HarmonyLib {
  public class HarmonyPatch:Attribute {public HarmonyPatch(Type t,string n){}}
- public class CodeInstruction {public OpCode opcode;public object operand;public CodeInstruction(OpCode code,object value){opcode=code;operand=value;}}
- public static class AccessTools {public static MethodInfo Method(Type t,string n){return t.GetMethod(n,BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Static);} public static FieldInfo Field(Type t,string n){return t.GetField(n,BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Static);}}
+ public class CodeInstruction {public OpCode opcode;public object operand;public CodeInstruction(OpCode code,object value){opcode=code;operand=value;} public bool Calls(MethodInfo method){return Equals(operand,method);}}
+ public static class AccessTools {public static MethodInfo Method(Type t,string n){return t.GetMethod(n,BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Static);} public static FieldInfo Field(Type t,string n){return t.GetField(n,BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Static);} public static MethodInfo PropertyGetter(Type t,string n){return t.GetProperty(n).GetGetMethod();}}
 }
 namespace Terraria {public class Player {public bool mouseInterface;}public static class Main {public static Player[] player={new Player()};public static int myPlayer;}}
-namespace TerrariaModder.Core.Config {public class ConfigPropertyMeta{}public class ModConfig{}}
+namespace TerrariaModder.Core.Config {public class ConfigPropertyMeta{public string Label {get;set;}public string Description {get;set;}}public class ModConfig{}}
 namespace TerrariaModder.Core {
  public class Manifest {public string Id;}
  public class Context {public TerrariaModder.Core.Config.ModConfig Config;}

@@ -8,16 +8,16 @@ public static class $_ {
     public static float SpawnRateMultiplier = 1f;
     public static void Initialize() {}
     public static void Draw() { if (IsOpen) Counter.Draws++; }
-    public static void Update() {}
+    public static void Update() { if (!IsOpen) TerrariaModder.Core.UI.UIRenderer.UnregisterPanelBounds(PanelId); }
     public static void ResetSession() { IsOpen = false; Counter.Resets++; }
 }
 "@ }) -join "`n"
 $harness = @'
 namespace HarmonyLib { public class HarmonyPatch : System.Attribute { public HarmonyPatch(System.Type t, string s) {} } }
 namespace Terraria {
-    public class Player { public bool active = true; }
+    public class Player { public bool active = true, mouseInterface; }
     public class NPC {}
-    public static class Main { public static bool gameMenu, dedServ; public static Player LocalPlayer = new Player(); }
+    public static class Main { public static bool gameMenu, dedServ, blockMouse; public static Player LocalPlayer = new Player(); }
 }
 namespace QualityOfTerraria {
     public static class Mod { public static bool WorldActive = true; }
@@ -40,9 +40,10 @@ namespace TerrariaModder.Core.UI {
     public static class UIRenderer {
         public static System.Collections.Generic.Dictionary<string, System.Action> Draws = new System.Collections.Generic.Dictionary<string, System.Action>();
         public static System.Collections.Generic.HashSet<string> Bounds = new System.Collections.Generic.HashSet<string>();
+        public static bool IsBlocking { get { return Bounds.Count > 0; } }
         public static void RegisterPanelDraw(string id, System.Action draw) { Draws[id] = draw; }
         public static void UnregisterPanelDraw(string id) { Draws.Remove(id); }
-        public static void UnregisterPanelBounds(string id) { Bounds.Remove(id); }
+        public static void UnregisterPanelBounds(string id) { Bounds.Remove(id); if (Bounds.Count == 0) { Terraria.Main.blockMouse = false; Terraria.Main.LocalPlayer.mouseInterface = false; } }
         public static void ClearAllPanelBounds() { Bounds.Clear(); }
     }
 }
@@ -71,6 +72,15 @@ namespace QualityOfTerraria.UI {
             UIManager.UpdateAll(); DrawAll();
             Check(Counter.Resets == 0 && Counter.Draws == 0, "专服不绘制且保留快照服务会话");
             Terraria.Main.dedServ = false;
+            UIManager.ResetSession();
+            Terraria.Main.LocalPlayer.mouseInterface = true;
+            Terraria.Main.blockMouse = true;
+            UIManager.UpdateAll();
+            Check(Terraria.Main.LocalPlayer.mouseInterface && Terraria.Main.blockMouse, "关闭的模组面板不能清除原版界面已有的鼠标保护");
+            Terraria.Main.LocalPlayer.mouseInterface = false;
+            Terraria.Main.blockMouse = false;
+            UIManager.UpdateAll();
+            Check(!Terraria.Main.LocalPlayer.mouseInterface && !Terraria.Main.blockMouse, "普通世界操作不凭空新增界面保护");
             TerrariaModder.Core.UI.UIRenderer.Bounds.Add("OtherMod.Panel");
             var reset = typeof(UIManager).GetMethod("ResetSession");
             if (reset != null) reset.Invoke(null, null);

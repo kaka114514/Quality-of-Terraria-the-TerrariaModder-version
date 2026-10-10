@@ -50,12 +50,11 @@ namespace QualityOfTerraria
             FrameEvents.OnPreUpdate += UpdateNetworkSession;
             GameEvents.OnWorldSave += SaveSession;
             GameEvents.OnReturnToMenu += EndSession;
-            FrameEvents.OnPostUpdate += ApplyReadyPatches;
         }
 
         private void ApplyReadyPatches()
         {
-            // 其他模组的内容与本地化补丁先安装，避免提前编译Core设置页并内联未翻译的getter。
+            // 游戏内容与嵌入依赖已就绪；设置页通过反射桥读取本地化，不依赖其他模组的补丁顺序。
             if (!_contentReady || _patchesApplied) return;
             _patchesApplied = true;
             int patchedCount = 0;
@@ -87,6 +86,7 @@ namespace QualityOfTerraria
         public void OnContentReady(ModContext context)
         {
             _contentReady = true;
+            ApplyReadyPatches();
             _logger?.Info("QualityOfTerraria: 内容已就绪。");
         }
 
@@ -116,7 +116,6 @@ namespace QualityOfTerraria
             EndSession();
             FrameEvents.OnPreUpdate -= CheckWorldSession;
             FrameEvents.OnPreUpdate -= UpdateNetworkSession;
-            FrameEvents.OnPostUpdate -= ApplyReadyPatches;
             GameEvents.OnWorldSave -= SaveSession;
             GameEvents.OnReturnToMenu -= EndSession;
             UI.UIManager.Unload();
@@ -167,6 +166,7 @@ namespace QualityOfTerraria
             FeatureNetwork.ResetSession();
             Patches.StorageInventoryGuard.ResetSession();
             Patches.WorldUIClickPatch.ResetSession();
+            Patches.VanillaUIInputDiagnostics.ResetSession();
             NetworkRuntime.ResetSession();
         }
 
@@ -185,6 +185,8 @@ namespace QualityOfTerraria
         {
             _instance?._logger?.Error(message, exception);
         }
+
+        internal static void LogInfo(string message) => _instance?._logger?.Info(message);
 
         public static string GetKeyLabel(string id, string fallback)
         {

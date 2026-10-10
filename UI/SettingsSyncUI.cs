@@ -105,8 +105,30 @@ namespace QualityOfTerraria.UI
     [HarmonyPatch(typeof(ModMenu), "DrawConfigProperty")]
     internal static class SettingsSyncRowDrawPatch
     {
+        private static readonly MethodInfo LabelGetter = AccessTools.PropertyGetter(typeof(ConfigPropertyMeta), "Label");
+        private static readonly MethodInfo DescriptionGetter = AccessTools.PropertyGetter(typeof(ConfigPropertyMeta), "Description");
+
         private static bool Prefix(int __0, int __1, int __2, ConfigPropertyMeta __3, ModConfig __4, string __5)
             => SettingsSyncUI.DrawConfigRow(__0, __1, __2, __3, __4, __5);
+
+        // Core 的自动属性 getter 会被 JIT 内联，绕过后来安装的本地化补丁。
+        // 反射调用保留所有模组的 getter 补丁，不自行解释标签或选择语言。
+        private static string ReadLabel(ConfigPropertyMeta metadata) => (string)LabelGetter.Invoke(metadata, null);
+        private static string ReadDescription(ConfigPropertyMeta metadata) => (string)DescriptionGetter.Invoke(metadata, null);
+
+        private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+        {
+            var readLabel = AccessTools.Method(typeof(SettingsSyncRowDrawPatch), nameof(ReadLabel));
+            var readDescription = AccessTools.Method(typeof(SettingsSyncRowDrawPatch), nameof(ReadDescription));
+            foreach (var instruction in instructions)
+            {
+                if (instruction.Calls(LabelGetter))
+                { instruction.opcode = OpCodes.Call; instruction.operand = readLabel; }
+                else if (instruction.Calls(DescriptionGetter))
+                { instruction.opcode = OpCodes.Call; instruction.operand = readDescription; }
+                yield return instruction;
+            }
+        }
     }
 
     [HarmonyPatch(typeof(PermissionService), "OnClientConnect")]

@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
+using QualityOfTerraria.UI;
 using TerrariaModder.Core.Config;
 using TerrariaModder.Core.UI;
 
@@ -23,7 +24,7 @@ public static class UICompatibilityCheck
         AppDomain.CurrentDomain.AssemblyResolve += (sender, request) => {
             string name = new AssemblyName(request.Name).Name + ".dll";
             if (name == "Terraria.dll") return Assembly.LoadFrom(Path.Combine(game, "Terraria.exe"));
-            foreach (string dir in new[] { game, Path.Combine(game,"TerrariaModder/core"), Path.Combine(game,"TerrariaModder/core/deps"), Path.Combine(game,"TerrariaModder/mods/vein-miner") }) {
+            foreach (string dir in new[] { game, Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"../../.."), Path.Combine(game,"TerrariaModder/core"), Path.Combine(game,"TerrariaModder/core/deps"), Path.Combine(game,"TerrariaModder/mods/vein-miner") }) {
                 string path = Path.Combine(dir, name); if (File.Exists(path)) return Assembly.LoadFrom(path);
             }
             return null;
@@ -42,6 +43,7 @@ public static class UICompatibilityCheck
         vm.Patch(AccessTools.PropertyGetter(localization,"CurrentLanguage"), transpiler: new HarmonyMethod(typeof(UICompatibilityCheck), nameof(ChineseLanguage)));
         var draw = AccessTools.Method(typeof(ModMenu), "DrawConfigProperty");
         var tab = AccessTools.Method(typeof(ModMenu), "DrawConfigTab");
+        if (mode.Contains("root")) return RunProduction(mode, vein, draw);
         if (mode.StartsWith("late")) InstallVeinGetters(vein);
         // "real" keeps the entire original Core body and patches only graphics APIs as spies.
         // Other modes keep its label/tooltip IL call sites and control flow, then stop before controls.
@@ -73,6 +75,48 @@ public static class UICompatibilityCheck
         if (!capturedClick) throw new Exception("UI click getter was inlined before late patch");
         Console.WriteLine("PASS " + mode);
         return 0;
+    }
+
+    private static int RunProduction(string mode, Assembly vein, MethodInfo draw)
+    {
+        InstallGraphicsSpies();
+        if (mode == "core-before-root-real")
+        {
+            AssertDraw(draw, "vein-miner", "#vm.config.enabled.label", "#vm.config.enabled.desc", "#vm.config.enabled.label", "#vm.config.enabled.desc");
+        }
+        if (mode == "vein-before-root-real") InstallVeinGetters(vein);
+        ui.CreateClassProcessor(typeof(SettingsSyncRowDrawPatch)).Patch();
+        // Force compilation with only QOT installed; then add VeinMiner's actual postfixes.
+        if (mode != "vein-before-root-real")
+        {
+            AssertDraw(draw, "vein-miner", "#vm.config.enabled.label", "#vm.config.enabled.desc", "#vm.config.enabled.label", "#vm.config.enabled.desc");
+            InstallVeinGetters(vein);
+        }
+        AssertDraw(draw, "vein-miner", "#vm.config.enabled.label", "#vm.config.enabled.desc", "启用模组", "总开关，关闭后所有功能停止工作");
+        if (mode == "root-repatch-real")
+        {
+            // A later third-party patch regenerates the entire Harmony replacement.
+            vm.Patch(draw, prefix: new HarmonyMethod(typeof(UICompatibilityCheck), nameof(Passthrough)));
+            AssertDraw(draw, "vein-miner", "#vm.config.enabled.label", "#vm.config.enabled.desc", "启用模组", "总开关，关闭后所有功能停止工作");
+        }
+        AssertDraw(draw, "other-mod", "Other label", "Other description", "Other label", "Other description");
+        AssertDraw(draw, "quality-of-terraria", "本模组设置", "本模组说明", "本模组设置", "本模组说明");
+        AssertDraw(draw, "other-mod", "Empty description", "", "Empty description", null);
+        Console.WriteLine("PASS " + mode);
+        return 0;
+    }
+
+    private static void AssertDraw(MethodInfo draw, string modId, string label, string description, string expectedLabel, string expectedDescription)
+    {
+        var meta = new ConfigPropertyMeta();
+        AccessTools.Field(typeof(ConfigPropertyMeta), "<Label>k__BackingField").SetValue(meta, label);
+        AccessTools.Field(typeof(ConfigPropertyMeta), "<Description>k__BackingField").SetValue(meta, description);
+        capturedLabel = capturedDescription = null;
+        try { draw.Invoke(null, new object[] { 0, 0, 300, meta, null, modId }); }
+        catch (TargetInvocationException stop) { if (stop.InnerException.Message != "fixture stops after actual label and tooltip") throw; }
+        Console.WriteLine("Production Draw " + modId + " Label=" + capturedLabel + " Description=" + capturedDescription);
+        if (capturedLabel != expectedLabel || capturedDescription != expectedDescription)
+            throw new Exception("Production metadata translation mismatch: expected " + expectedLabel + " / " + expectedDescription);
     }
 
     private static void InstallVeinGetters(Assembly vein)

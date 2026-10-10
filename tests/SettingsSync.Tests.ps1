@@ -106,8 +106,8 @@ namespace QualityOfTerraria.Networking {
   }
   static System.IO.BinaryReader Read(string data){return new System.IO.BinaryReader(new System.IO.MemoryStream(Convert.FromBase64String(data)));}
   static string Write(Action<System.IO.BinaryWriter> f){using(var s=new System.IO.MemoryStream()){using(var w=new System.IO.BinaryWriter(s,System.Text.Encoding.UTF8,true)){f(w);}return Convert.ToBase64String(s.ToArray());}}
-  static void Header(System.IO.BinaryWriter w,string nonce,string room){w.Write("1.1.1");w.Write(nonce);w.Write(room);}
-  static void Hello(int slot,string nonce){TerrariaModder.Core.Net.NetSync.Request(slot,"qot.settings.hello",Write(w=>{w.Write("1.1.1");w.Write(nonce);w.Write(2);w.Write(1);w.Write("Personal");w.Write((byte)1);w.Write(true);}));NetworkRuntime.Update();}
+  static void Header(System.IO.BinaryWriter w,string nonce,string room){w.Write("1.1.2");w.Write(nonce);w.Write(room);}
+  static void Hello(int slot,string nonce){TerrariaModder.Core.Net.NetSync.Request(slot,"qot.settings.hello",Write(w=>{w.Write("1.1.2");w.Write(nonce);w.Write(2);w.Write(1);w.Write("Personal");w.Write((byte)1);w.Write(true);}));NetworkRuntime.Update();}
   static string Room(){var h=TerrariaModder.Core.Net.NetSync.Sent.FindLast(x=>x.Item3=="qot.settings.hello");using(var r=Read(h.Item4)){r.ReadString();r.ReadString();return r.ReadString();}}
   static string Create(string nonce,string room,int world){TerrariaModder.Core.Net.NetSync.Request(0,"qot.settings.create",Write(w=>{Header(w,nonce,room);w.Write(2);w.Write(2);w.Write("Personal");w.Write((byte)1);w.Write(false);w.Write("World");w.Write((byte)2);w.Write(world);}));NetworkRuntime.Update();var offer=TerrariaModder.Core.Net.NetSync.Sent.FindLast(x=>x.Item3=="qot.settings.offer");using(var r=Read(offer.Item4)){r.ReadString();r.ReadString();r.ReadString();return r.ReadString();}}
   static void Decision(string id,string room,bool approve){TerrariaModder.Core.Net.NetSync.Request(1,"qot.settings.decision",Write(w=>{Header(w,new string('b',32),room);w.Write(id);w.Write(approve);}));NetworkRuntime.Update();}

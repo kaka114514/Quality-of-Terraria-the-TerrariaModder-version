@@ -28,7 +28,20 @@ namespace QualityOfTerraria.UI
 
         private static void RegisterDraw(string id, Action draw)
         {
-            UIRenderer.RegisterPanelDraw(id, () => { if (CanRender) draw(); });
+            UIRenderer.RegisterPanelDraw(id, () => { if (CanRender) PreserveVanillaInput(draw); });
+        }
+
+        private static void PreserveVanillaInput(Action action)
+        {
+            Player player = Main.LocalPlayer;
+            bool preserve = !UIRenderer.IsBlocking;
+            bool mouseInterface = player.mouseInterface, blockMouse = Main.blockMouse;
+            try { action(); }
+            finally
+            {
+                // Core注销不存在／最后一个面板时会清全局输入状态；不能顺带清掉原版背包的悬停保护。
+                if (preserve) { player.mouseInterface |= mouseInterface; Main.blockMouse |= blockMouse; }
+            }
         }
 
         public static void UpdateAll()
@@ -41,6 +54,11 @@ namespace QualityOfTerraria.UI
                 return;
             }
             if (!_initialized) Initialize();
+            PreserveVanillaInput(UpdatePanels);
+        }
+
+        private static void UpdatePanels()
+        {
             ExtremeStorageUI.Update();
             SuperVaultUI.Update();
             PlayerStatsUI.Update();
