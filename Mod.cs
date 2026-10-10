@@ -4,6 +4,9 @@ using TerrariaModder.Core.Logging;
 using TerrariaModder.Core.Events;
 using Terraria;
 using QualityOfTerraria.Networking;
+using Terraria.GameInput;
+using TerrariaModder.Core.Input;
+using TerrariaModder.Core.UI;
 
 namespace QualityOfTerraria
 {
@@ -11,6 +14,7 @@ namespace QualityOfTerraria
     {
         public static QualityOfTerrariaConfig Config { get; private set; }
         public static bool WorldActive { get; private set; }
+        internal static bool VeinMinerLegacyLoaded { get; private set; }
         private static Mod _instance;
         private ModContext _context;
         private ILogger _logger;
@@ -23,7 +27,9 @@ namespace QualityOfTerraria
             _instance = this;
             _context = context;
             Config = context.GetConfig<QualityOfTerrariaConfig>();
+            VeinMinerLegacyLoaded = context.IsModLoaded("vein-miner");
             LocalWorldSettings.Initialize();
+            Features.VeinConfigMigration.Apply(context);
 
             // 注册常用快捷键（严格对应用户指定键位，杜绝占用 F6~F12）
             context.RegisterKeybind("space-wand", "快速放置", "切换快速放置，开启后手持方块/平台/墙按住鼠标左键拖拽铺设", "P", WandsAndTools.ExecuteQuickPlace);
@@ -44,6 +50,9 @@ namespace QualityOfTerraria
             context.RegisterKeybind("spawn-rate-control", "刷怪率与节日控制", "调节0～100倍刷怪率及节日、世界特性；联机由服务器控制", "OPENBRACKET", UI.BuffAndSpawnRateUI.Toggle);
             context.RegisterKeybind("autofisher", "自动钓鱼机", "背包内有可用鱼竿及鱼饵，在液体附近启用，每10秒尝试一次原版钓鱼结算", "Z", Features.Autofisher.Toggle);
             context.RegisterKeybind("target-dummy", "测试假人桩", "在鼠标处放置或移除测试假人，实时统计DPS", "X", Features.TargetDummySystem.ToggleOrSpawnAtCursor);
+            context.RegisterKeybind("toggle-vein-mining", "切换连锁挖矿", "开启或关闭矿石连锁挖掘", "V", Features.VeinMiningSystem.Toggle);
+            context.RegisterKeybind("toggle-speed-boost", "切换工具加速", "切换挖掘、砍伐和放置加速，不改变各自速度设置", "Backslash", Features.ToolSpeedSystem.Toggle);
+            context.RegisterKeybind("force-vein-mine", "强制连锁挖矿（按住）", "按住此键挖矿，临时启用连锁；松开恢复原开关", "LeftShift", null);
 
             UI.UIManager.Initialize();
             FrameEvents.OnPreUpdate += CheckWorldSession;
@@ -85,6 +94,9 @@ namespace QualityOfTerraria
 
         public void OnContentReady(ModContext context)
         {
+            VeinMinerLegacyLoaded = context.IsModLoaded("vein-miner");
+            Features.VeinMiningSystem.Suspended = VeinMinerLegacyLoaded;
+            if (VeinMinerLegacyLoaded) _logger?.Warn("独立vein-miner仍在加载，更好的体验暂停重复连锁与速度功能；请只保留其中一个。");
             _contentReady = true;
             ApplyReadyPatches();
             _logger?.Info("QualityOfTerraria: 内容已就绪。");
@@ -100,6 +112,8 @@ namespace QualityOfTerraria
             SettingsSync.Initialize();
             ToolNetwork.Initialize();
             FeatureNetwork.Initialize();
+            VeinMiningNetwork.Initialize();
+            Features.VeinMiningSystem.Suspended = VeinMinerLegacyLoaded;
             UI.RemoteStorageSnapshots.Initialize();
             UI.SuperVaultUI.EnsureLoadedForCurrentPlayer();
             UI.ExtremeStorageUI.EnsureLoadedForCurrentWorld();
@@ -123,6 +137,7 @@ namespace QualityOfTerraria
             SettingsSync.Unload();
             ToolNetwork.Unload();
             FeatureNetwork.Unload();
+            VeinMiningNetwork.Unload();
             new HarmonyLib.Harmony("QualityOfTerraria").UnpatchAll("QualityOfTerraria");
             _contentReady = _patchesApplied = false;
             _context = null;
@@ -164,6 +179,9 @@ namespace QualityOfTerraria
             SettingsSync.ResetSession();
             ToolNetwork.ResetSession();
             FeatureNetwork.ResetSession();
+            VeinMiningNetwork.ResetSession();
+            Features.VeinMiningSystem.ResetSession();
+            Features.ToolSpeedSystem.ResetSession();
             Patches.StorageInventoryGuard.ResetSession();
             Patches.WorldUIClickPatch.ResetSession();
             Patches.VanillaUIInputDiagnostics.ResetSession();
@@ -178,7 +196,25 @@ namespace QualityOfTerraria
             SettingsSync.Update();
             ToolNetwork.Update();
             FeatureNetwork.Update();
+            VeinMiningNetwork.Update();
+            Features.VeinMiningSystem.IsForced = IsForceVeinMiningHeld();
+            Features.VeinMiningSystem.Update();
             Patches.StorageInventoryGuard.Update();
+        }
+
+        internal static bool IsForceVeinMiningHeld()
+        {
+            if (!WorldActive || Main.gameMenu || Main.dedServ || Main.netMode == 2 || VeinMinerLegacyLoaded ||
+                Main.LocalPlayer == null || !Main.LocalPlayer.active || Main.LocalPlayer.dead || Main.LocalPlayer.mouseInterface ||
+                Main.drawingPlayerChat || Main.editSign || Main.editChest || PlayerInput.WritingText || UIRenderer.IsWaitingForKeyInput ||
+                Patches.StorageInventoryGuard.Locked) return false;
+            KeyCombo key = _instance?._context?.GetKeybind("force-vein-mine")?.CurrentKey;
+            if (key == null) return false;
+            // Core把单独Shift也与Shift修饰符作严格比较；处理修饰键自身，其他按键继续沿用改键规则。
+            if (key.Key == 16 || key.Key == 160 || key.Key == 161)
+                return (key.Key == 16 ? InputState.IsShiftDown() : InputState.IsKeyDown(key.Key)) &&
+                    key.Ctrl == InputState.IsCtrlDown() && key.Alt == InputState.IsAltDown();
+            return key.IsPressed();
         }
 
         public static void LogError(string message, Exception exception)

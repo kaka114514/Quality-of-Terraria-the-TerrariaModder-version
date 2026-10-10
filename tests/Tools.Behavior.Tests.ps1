@@ -43,6 +43,7 @@ if (!$Baseline) {
     $extraDummy = (Method $dummy 'public static void RecordDamage(int dummyIndex, int damage, long hitSource)') + (Method $dummy 'public static void ResetSession()')
     $recallClass = Method $qol 'public static class InstantRecallPatch'
     $recall = $recallClass + (Method $qol 'public static class ToolStatsPatch') + (Method $qol 'public static class ToolAnimationPatch')
+    $recall = $recall.Replace('Networking.SettingsSync', 'SettingsSync').Replace('Features.ToolSpeedSystem', 'ToolSpeedSystem')
     $hits = (Method $town 'public static class DummyProjectileSourcePatch') + (Method $town 'public static class TownNPCImmortalPatch')
 } else {
     $recall = Method $qol 'public static class PlayerUpdatePatch'
@@ -109,6 +110,7 @@ public static class UIRenderer {
 }
 public class Config { public bool WandMaterialNoConsume, MaxStack9999=true, InstantRecall=true, FastToolSpeed, ExtraTileReach, NoDamageVariance, TownNPCImmortal; }
 public static class SettingsSync { public static Config[] Profiles={new Config(),new Config {WandMaterialNoConsume=true}}; public static Config GetPlayerConfig(int player) {return Main.netMode==2?Profiles[player]:Mod.Config;} }
+public static class ToolSpeedSystem {public static bool SpeedActive=true;public static float GetMultiplier(int boost){return 1+Math.Max(0,Math.Min(3,boost));}}
 public static class ToolNetwork { public static bool Busy; public static int Requests; public static void Request(string action,int slot=-1,params int[] values) {Requests++;} }
 public static class RemoteStorageOperations { public static bool Busy; }
 public static class Mod { public static Config Config = new Config(); public static bool WorldActive=true; }
@@ -188,9 +190,9 @@ if ($Baseline) {
    }
    Mod.Config.InstantRecall=false; Main.LocalPlayer.itemTime=90; QoL.InstantRecallPatch.Postfix(Main.LocalPlayer,Main.LocalPlayer.HeldItem); Check(Main.LocalPlayer.itemTime==90,"瞬传关闭不修改原版计时");
    foreach(bool speed in new bool[] {false,true}) foreach(bool reach in new bool[] {false,true}) {
-    Mod.Config.FastToolSpeed=speed; Mod.Config.ExtraTileReach=reach?5:0; Main.LocalPlayer.pickSpeed=0.8f; Main.LocalPlayer.tileSpeed=1.5f; Main.LocalPlayer.wallSpeed=1; Player.tileRangeX=5; Player.tileRangeY=4;
+    Mod.Config.DigSpeedBoost=Mod.Config.AxeSpeedBoost=Mod.Config.PlaceSpeedBoost=speed?1:0; Mod.Config.ExtraTileReach=reach?5:0; Main.LocalPlayer.pickSpeed=0.8f; Main.LocalPlayer.tileSpeed=1.5f; Main.LocalPlayer.wallSpeed=1; Player.tileRangeX=5; Player.tileRangeY=4;
     QoL.ToolStatsPatch.Postfix(Main.LocalPlayer); Check(Player.tileRangeX==(reach?10:5) && Player.tileRangeY==(reach?9:4),"距离与速度独立 "+speed+"/"+reach);
-    Check(Main.LocalPlayer.pickSpeed==(speed?0.4f:0.8f) && Main.LocalPlayer.tileSpeed==(speed?3:1.5f) && Main.LocalPlayer.wallSpeed==(speed?2:1),"工具与放置速度 "+speed+"/"+reach);
+    Check(Main.LocalPlayer.pickSpeed==(speed?0.4f:0.8f) && Main.LocalPlayer.tileSpeed==(speed?0.75f:1.5f) && Main.LocalPlayer.wallSpeed==(speed?0.5f:1),"工具与放置速度 "+speed+"/"+reach);
    }
    Main.LocalPlayer.HeldItem.axe=10; Main.LocalPlayer.itemTime=20; Main.LocalPlayer.itemAnimation=40; Main.LocalPlayer.itemAnimationMax=40; QoL.InstantRecallPatch.Postfix(Main.LocalPlayer,Main.LocalPlayer.HeldItem); QoL.ToolAnimationPatch.Postfix(Main.LocalPlayer,Main.LocalPlayer.HeldItem);
    Check(Main.LocalPlayer.itemTime==10 && Main.LocalPlayer.itemAnimation==20,"斧锤使用与动画加速");
@@ -241,7 +243,7 @@ if ($Baseline) {
    }
 '@)
 }
-if (!$Baseline) { $harness=$harness.Replace('FastToolSpeed, ExtraTileReach, NoDamageVariance', 'FastToolSpeed, NoDamageVariance').Replace('TownNPCImmortal; }', 'TownNPCImmortal; public int ExtraTileReach=5; }') }
+if (!$Baseline) { $harness=$harness.Replace('FastToolSpeed, ExtraTileReach, NoDamageVariance', 'NoDamageVariance').Replace('TownNPCImmortal; }', 'TownNPCImmortal; public int ExtraTileReach=5,DigSpeedBoost,AxeSpeedBoost,PlaceSpeedBoost; }') }
 # 旧版 Windows PowerShell 的编译器不支持插值字符串；仅消息文案降级，不改执行算法。
 $harness = $harness.Replace('$"', '"')
 Add-Type -TypeDefinition $harness -Language CSharp

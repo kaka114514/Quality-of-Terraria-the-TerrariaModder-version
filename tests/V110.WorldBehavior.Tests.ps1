@@ -6,7 +6,7 @@ $rate=Get-Content (Join-Path $root 'Patches/WorldQoLCompletionPatches.cs') -Raw
 $rate='using System;using Terraria;using System.Linq;using TerrariaModder.Core.Config;using TerrariaModder.Core.Net;using QualityOfTerraria.Networking;'+$rate.Substring($rate.IndexOf('namespace '),$rate.IndexOf('        [HarmonyPatch]')-$rate.IndexOf('namespace '))+'}}'
 Set-Content (Join-Path $fixture 'Rate.cs') $rate
 $player=Get-Content (Join-Path $root 'Patches/PlayerQoLPatches.cs') -Raw
-$toolStart=$player.IndexOf('        [HarmonyPatch(typeof(Player), nameof(Player.UpdateEquips))]')
+$toolStart=$player.IndexOf('        [HarmonyPatch(typeof(Player), "CapAttackSpeeds")]')
 $tool=$player.Substring($toolStart,$player.IndexOf('        [HarmonyPatch(typeof(Player), "ApplyItemAnimation"')-$toolStart)
 $respawnStart=$player.IndexOf('        [HarmonyPatch(typeof(Player), "GetRespawnTime")]')
 $respawn=$player.Substring($respawnStart,$player.IndexOf('        // 6. 死亡保存增益')-$respawnStart)

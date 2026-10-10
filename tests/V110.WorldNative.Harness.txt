@@ -15,4 +15,5 @@ public static class WorldNativeHooks {
  }
 }
 namespace QualityOfTerraria{public static class Mod{public static QualityOfTerrariaConfig Config;public static bool WorldActive;}}
+namespace QualityOfTerraria.Features {internal static class ToolSpeedSystem {internal static bool SpeedActive=false;internal static float GetMultiplier(int boost){return 1+Math.Max(0,Math.Min(3,boost));}}}
 namespace QualityOfTerraria.Networking{internal static class SettingsSync{internal static QualityOfTerrariaConfig GetPlayerConfig(int player){return null;}internal static bool SaveVerified(QualityOfTerrariaConfig config,out string error){error=null;return true;}}internal static class LocalWorldSettings{internal static bool Save(out string error){error=null;return true;}}}

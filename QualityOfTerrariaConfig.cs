@@ -1,15 +1,56 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using TerrariaModder.Core.Config;
 
 namespace QualityOfTerraria
 {
     public class QualityOfTerrariaConfig : ModConfig
     {
-        public override int Version => 2;
+        internal bool NeedsVeinMinerImport;
+        internal string VeinImportStateError;
+        private bool _veinImportChecked;
+        internal static readonly string[] VeinSettingKeys = {
+            nameof(VeinMiningEnabled), nameof(VeinMiningAutoLoot), nameof(VeinMiningRange), nameof(VeinMiningMaxBlocks),
+            nameof(VeinMiningCheckPickaxePower), nameof(VeinMiningMatchExactType), nameof(VeinMiningShowMessages),
+            nameof(DigSpeedBoost), nameof(AxeSpeedBoost), nameof(PlaceSpeedBoost)
+        };
+
+        public override int Version
+        {
+            get
+            {
+                // Core 会在加载迁移后立即保存。首次读取版本时保留保存前的导入状态。
+                if (!_veinImportChecked && ConfigManager.GetCurrentScope() == ConfigScope.Client && !string.IsNullOrEmpty(FilePath))
+                {
+                    _veinImportChecked = true;
+                    try
+                    {
+                        if (File.Exists(FilePath + ".vein-import.pending") || !File.Exists(FilePath)) NeedsVeinMinerImport = true;
+                        else
+                        {
+                            var raw = ConfigManager.ParseJsonRaw(File.ReadAllText(FilePath));
+                            NeedsVeinMinerImport = !raw.TryGetValue("_version", out object version) || Convert.ToInt32(version) < 3
+                                || VeinSettingKeys.Any(key => !raw.ContainsKey(key));
+                        }
+                        // 自动保存前落盘，导入失败／中断重启后仍能重试；不向配置面板添加状态项。
+                        if (NeedsVeinMinerImport) File.WriteAllText(FilePath + ".vein-import.pending", "3");
+                    }
+                    catch (Exception exception) { VeinImportStateError = exception.Message; }
+                }
+                return 3;
+            }
+        }
 
         protected override void Migrate(Dictionary<string, object> raw, int oldVersion)
         {
+            if (raw.TryGetValue("FastToolSpeed", out object speed) && speed is bool fast)
+            {
+                if (!raw.ContainsKey(nameof(DigSpeedBoost))) DigSpeedBoost = fast ? 1 : 0;
+                if (!raw.ContainsKey(nameof(AxeSpeedBoost))) AxeSpeedBoost = fast ? 1 : 0;
+                if (!raw.ContainsKey(nameof(PlaceSpeedBoost))) PlaceSpeedBoost = fast ? 1 : 0;
+            }
             if (raw.TryGetValue(nameof(ExtraTileReach), out object reach) && reach is bool enabled)
                 ExtraTileReach = enabled ? 5 : 0;
             if (raw.TryGetValue(nameof(UniversalPylons), out object pylons) && pylons is bool universal)
@@ -121,9 +162,55 @@ namespace QualityOfTerraria
         public int ExtraGrabRange { get; set; } = 15;
 
         [Client]
-        [Label("工具与放置加速")]
-        [Description("提升工具挥舞、方块放置与墙壁粉刷速度。")]
-        public bool FastToolSpeed { get; set; } = true;
+        [Label("挖掘速度级别")]
+        [Range(0, 3)]
+        [Description("0、1、2、3分别为原版、2倍、3倍、4倍挖掘速度。")]
+        public int DigSpeedBoost { get; set; } = 2;
+
+        [Client]
+        [Label("砍伐速度级别")]
+        [Range(0, 3)]
+        [Description("0、1、2、3分别为原版、2倍、3倍、4倍砍伐速度。")]
+        public int AxeSpeedBoost { get; set; } = 1;
+
+        [Client]
+        [Label("放置速度级别")]
+        [Range(0, 3)]
+        [Description("0、1、2、3分别为原版、2倍、3倍、4倍方块和墙壁放置速度。")]
+        public int PlaceSpeedBoost { get; set; } = 0;
+
+        [Client]
+        [Label("连锁挖矿")]
+        [Description("挖掘矿石时连锁开采相连矿石；V切换，按住Shift临时强制启用。")]
+        public bool VeinMiningEnabled { get; set; } = true;
+
+        [Client]
+        [Label("矿石自动入包")]
+        [Description("开采的矿石按原版拾取规则收进背包，背包满时保留地面掉落。")]
+        public bool VeinMiningAutoLoot { get; set; } = true;
+
+        [Client]
+        [Label("连锁挖矿范围（格）")]
+        [Range(1, 30)]
+        public int VeinMiningRange { get; set; } = 12;
+
+        [Client]
+        [Label("连锁挖矿最大数量")]
+        [Range(1, 500)]
+        public int VeinMiningMaxBlocks { get; set; } = 64;
+
+        [Client]
+        [Label("连锁挖矿检查镐力")]
+        [Description("连锁开采时检查所持工具镐力；关闭仍保留原版地形保护。")]
+        public bool VeinMiningCheckPickaxePower { get; set; } = true;
+
+        [Client]
+        [Label("连锁挖矿仅匹配同种矿石")]
+        public bool VeinMiningMatchExactType { get; set; } = true;
+
+        [Client]
+        [Label("连锁挖矿操作提示")]
+        public bool VeinMiningShowMessages { get; set; } = true;
 
         [Client]
         [Label("物块放置与工具触及距离增加量（格）")]

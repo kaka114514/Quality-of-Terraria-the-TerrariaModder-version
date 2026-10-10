@@ -4,7 +4,7 @@ $fixture=Join-Path $root 'bin/v110-world/native'
 New-Item $fixture -ItemType Directory -Force | Out-Null
 Copy-Item (Join-Path $PSScriptRoot 'V110.WorldNative.Harness.txt') (Join-Path $fixture 'Harness.cs') -Force
 $player=Get-Content (Join-Path $root 'Patches/PlayerQoLPatches.cs') -Raw
-$toolStart=$player.IndexOf('        [HarmonyPatch(typeof(Player), nameof(Player.UpdateEquips))]')
+$toolStart=$player.IndexOf('        [HarmonyPatch(typeof(Player), "CapAttackSpeeds")]')
 $tool=$player.Substring($toolStart,$player.IndexOf('        [HarmonyPatch(typeof(Player), "ApplyItemAnimation"')-$toolStart)
 $respawnStart=$player.IndexOf('        [HarmonyPatch(typeof(Player), "GetRespawnTime")]')
 $respawn=$player.Substring($respawnStart,$player.IndexOf('        // 6. 死亡保存增益')-$respawnStart)

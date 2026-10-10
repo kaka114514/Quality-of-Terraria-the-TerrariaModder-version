@@ -15,7 +15,7 @@
 
 `tests/` 中的游戏、Core、Harmony、Mono.Cecil及SDK路径需要按本机安装位置调整。多数脚本可在 PowerShell 7 中执行；依赖真实XNA／Core运行时的脚本使用32位 Windows PowerShell。测试生成物放在忽略的 `bin/` 下，不随发布包分发。
 
-先构建生产DLL，再运行相关脚本。以下为 v1.1.0 的主要检查：
+先构建生产DLL，再运行相关脚本。以下列出 v1.0.1 与 v1.1.0 的主要检查：
 
 | 检查范围 | 脚本 |
 | --- | --- |
@@ -28,6 +28,7 @@
 | 设置申请、保存核验与单机世界配置 | `SettingsSync.Tests.ps1`、`SettingsSyncCore.Tests.ps1`、`SettingsSyncSaveCore.Tests.ps1`、`LocalWorldSettings.Tests.ps1` |
 | 设置列表、刷怪滑条与旅商按钮 | `SettingsSyncUI.Tests.ps1`、`SpawnRateUI.Tests.ps1`、`TravelShopUI.Tests.ps1`、`WorldUIClick.Tests.ps1`、`WorldUIClick.Native.Tests.ps1`、`PatchLifecycle.Tests.ps1`、`UICompatibility.Native.Tests.ps1`、`VanillaUIMouseState.Native.Tests.ps1` |
 | 建造、液体与世界工具请求 | `ToolNetwork.Behavior.Tests.ps1`、`ToolNetwork.Native.Tests.ps1`、`Tools.Behavior.Tests.ps1`、`Tools.Contracts.Tests.ps1` |
+| 连锁挖矿、设置迁移、速度级别与按键 | `VeinMining.Behavior.Tests.ps1`、`VeinMiningNetwork.Tests.ps1`、`VeinSpeed.Behavior.Tests.ps1`、`VeinIntegration.Input.Tests.ps1` |
 | 结构定位、测试假人与功能网络 | `FeatureNetwork.Behavior.Tests.ps1`、`FeatureNetwork.Native.Tests.ps1`、`FeatureNetwork.Dependencies.Tests.ps1` |
 | 既有存储、UI和生命周期回归 | `Storage.Tests.ps1`、`StorageBehavior.Tests.ps1`、`StorageUI.Tests.ps1`、`StorageCrafting.Tests.ps1`、`StorageIcon.Tests.ps1`、`StorageIcon.Drawing.Tests.ps1`、`PanelLayout.Tests.ps1`、`QuickPlacePreview.Tests.ps1`、`WorldSession.Tests.ps1`、`ModLifecycle.Tests.ps1`、`StartupLoadOrder.Tests.ps1` |
 
@@ -41,6 +42,10 @@ dotnet build -c Release
 .\tests\RemoteStorage.Transactions.Tests.ps1
 .\tests\SettingsSync.Tests.ps1
 .\tests\ToolNetwork.Behavior.Tests.ps1
+.\tests\VeinMining.Behavior.Tests.ps1
+.\tests\VeinMiningNetwork.Tests.ps1
+.\tests\VeinSpeed.Behavior.Tests.ps1
+.\tests\VeinIntegration.Input.Tests.ps1
 .\tests\FeatureNetwork.Behavior.Tests.ps1
 ```
 

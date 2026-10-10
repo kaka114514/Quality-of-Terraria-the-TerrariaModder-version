@@ -23,6 +23,11 @@ public static class AllPatchesCheck {
     Console.WriteLine("PASS "+patch.FullName+" "+targets.Count);
    } catch(Exception e){failed++;Console.WriteLine("FAIL "+patch.FullName+" "+e);}
   }
+  checks++;try {
+   var mining=production.GetType("QualityOfTerraria.Features.VeinMiningSystem",true);
+   mining.GetMethod("IsOre",BindingFlags.Static|BindingFlags.NonPublic).Invoke(null,new object[]{(ushort)0});
+   Console.WriteLine("PASS VeinMiningSystem binds real 1.4.5.8 pick and pickup methods");
+  } catch(Exception e){failed++;Console.WriteLine("FAIL VeinMiningSystem real vanilla method bindings "+e);}
   Console.WriteLine("全部真实1.4.5.8 x86 Harmony挂接："+(checks-failed)+"/"+checks+"（未启动游戏）");return failed;
  }
 }

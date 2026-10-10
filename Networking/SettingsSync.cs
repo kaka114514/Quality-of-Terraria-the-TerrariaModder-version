@@ -13,7 +13,7 @@ namespace QualityOfTerraria.Networking
     internal static class SettingsSync
     {
         private const string Prefix = "qot.settings.";
-        private const string Version = "1.0.3";
+        private const string Version = "1.1.0";
         private const int MaxRequests = 16;
         private static string _clientNonce, _room;
         private static int _lifecycle, _helloFrames;

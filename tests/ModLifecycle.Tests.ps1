@@ -22,15 +22,17 @@ namespace QualityOfTerraria.Networking {
     public static class SettingsSync { public static void Initialize() {} public static void ResetSession() {} }
     public static class ToolNetwork { public static void Initialize() {} public static void ResetSession() {} }
     public static class FeatureNetwork { public static void Initialize() {} public static void ResetSession() {} }
+    public static class VeinMiningNetwork { public static void Initialize() {} public static void ResetSession() {} }
     public static class NetworkRuntime { public static void ResetSession() {} }
     public static class LocalWorldSettings { public static void Restore() {} }
     public static class StorageTransactionJournal { public static void EndServerSession() {} }
 }
+namespace QualityOfTerraria.Features { public static class VeinMiningSystem { public static bool Suspended; public static void ResetSession() {} } public static class ToolSpeedSystem { public static void ResetSession() {} } }
 namespace QualityOfTerraria.Patches { public static class StorageInventoryGuard { public static void ResetSession() {} } public static class WorldUIClickPatch { public static void ResetSession() {} } public static class VanillaUIInputDiagnostics { public static void ResetSession() {} } }
 namespace QualityOfTerraria {
     public class Logger { public void Info(string text) {} }
     public class Mod {
-        public static bool WorldActive;
+        public static bool WorldActive, VeinMinerLegacyLoaded;
         private Logger _logger = new Logger();
         private bool _serverSession;
         __METHODS__

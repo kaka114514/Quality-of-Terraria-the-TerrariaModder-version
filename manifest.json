@@ -1,7 +1,7 @@
 {
   "id": "quality-of-terraria",
   "name": "Quality of Terraria 更好的体验",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "framework_version": ">=0.4.1",
   "author": "487666123 / Ported for TerrariaModder",
   "description": "移植自 tModLoader MOD 更好的体验",
@@ -90,6 +90,24 @@
       "label": "测试假人桩",
       "description": "在鼠标处放置或移除测试假人，实时统计DPS",
       "default": "X"
+    },
+    {
+      "id": "toggle-vein-mining",
+      "label": "切换连锁挖矿",
+      "description": "开启或关闭相连矿石的连锁挖掘",
+      "default": "V"
+    },
+    {
+      "id": "toggle-speed-boost",
+      "label": "切换工具加速",
+      "description": "暂停或恢复挖掘、砍伐和放置速度加成",
+      "default": "Backslash"
+    },
+    {
+      "id": "force-vein-mine",
+      "label": "强制连锁挖矿（按住）",
+      "description": "按住左Shift临时连锁挖矿，松开后恢复原开关",
+      "default": "LeftShift"
     }
   ],
   "multiplayer": "required"
