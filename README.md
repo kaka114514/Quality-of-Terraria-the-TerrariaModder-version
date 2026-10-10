@@ -1,10 +1,11 @@
 # Quality of Terraria 更好的体验
 
-让收纳、建造和探索方便一些的 TerrariaModder 模组。当前版本 **v1.0.0**，适用于 **Terraria 1.4.5.8、TerrariaModder 0.4.1**。
+移植自tModLoader MOD 更好的体验https://github.com/487666123/ImproveGame
+让收纳、建造和探索方便一些的 Terraria 模组。当前版本 **v1.0.0**，适用于 **Terraria 1.4.5.8、TerrariaModder 0.4.1**。
 
 ## 安装与设置
 
-1. 先安装 TerrariaModder。
+1. 先安装 TerrariaModder https://www.nexusmods.com/terraria/mods/135
 2. 把发布包中的 `quality-of-terraria` 文件夹放入游戏目录的 `TerrariaModder/mods/`。
 3. 更新模组时替换原文件夹中的同名文件，然后重新启动游戏。
 4. 在加载器的模组设置中调整功能开关和快捷键。
