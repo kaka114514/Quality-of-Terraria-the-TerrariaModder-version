@@ -31,7 +31,8 @@ namespace QualityOfTerraria.UI
         {
             rows.Add(row);
             if (!_enabled || row.Item1 != "header" || row.Item3?.Manifest?.Id != ModId || row.Item3.Context?.Config != Mod.Config) return;
-            foreach (var marker in Markers) rows.Add(ValueTuple.Create("property", (object)marker, row.Item3));
+            int count = 2 + Math.Min(4, SettingsSync.Requests.Count);
+            for (int i = 0; i < count; i++) rows.Add(ValueTuple.Create("property", (object)Markers[i], row.Item3));
         }
 
         internal static bool DrawConfigRow(int x, int y, int width, ConfigPropertyMeta metadata, ModConfig config, string modId)

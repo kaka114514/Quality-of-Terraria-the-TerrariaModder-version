@@ -15,6 +15,7 @@ namespace QualityOfTerraria
         private ModContext _context;
         private ILogger _logger;
         private bool _serverSession;
+        private bool _contentReady, _patchesApplied;
 
         public override void Initialize(ModContext context)
         {
@@ -49,8 +50,14 @@ namespace QualityOfTerraria
             FrameEvents.OnPreUpdate += UpdateNetworkSession;
             GameEvents.OnWorldSave += SaveSession;
             GameEvents.OnReturnToMenu += EndSession;
+            FrameEvents.OnPostUpdate += ApplyReadyPatches;
+        }
 
-            // 应用所有 Harmony 补丁（城镇NPC、测试假人、药水增益、环境等）
+        private void ApplyReadyPatches()
+        {
+            // 其他模组的内容与本地化补丁先安装，避免提前编译Core设置页并内联未翻译的getter。
+            if (!_contentReady || _patchesApplied) return;
+            _patchesApplied = true;
             int patchedCount = 0;
             var harmony = new HarmonyLib.Harmony("QualityOfTerraria");
             foreach (var type in typeof(Mod).Assembly.GetTypes())
@@ -69,7 +76,7 @@ namespace QualityOfTerraria
                     }
                     catch (Exception ex)
                     {
-                        _logger?.Warn($"[Harmony] 跳过补丁 {type.Name}: {ex.Message}");
+                        _logger?.Warn($"[Harmony] 跳过补丁 {type.Name}: {ex}");
                     }
                 }
             }
@@ -79,6 +86,7 @@ namespace QualityOfTerraria
 
         public void OnContentReady(ModContext context)
         {
+            _contentReady = true;
             _logger?.Info("QualityOfTerraria: 内容已就绪。");
         }
 
@@ -108,6 +116,7 @@ namespace QualityOfTerraria
             EndSession();
             FrameEvents.OnPreUpdate -= CheckWorldSession;
             FrameEvents.OnPreUpdate -= UpdateNetworkSession;
+            FrameEvents.OnPostUpdate -= ApplyReadyPatches;
             GameEvents.OnWorldSave -= SaveSession;
             GameEvents.OnReturnToMenu -= EndSession;
             UI.UIManager.Unload();
@@ -115,6 +124,8 @@ namespace QualityOfTerraria
             SettingsSync.Unload();
             ToolNetwork.Unload();
             FeatureNetwork.Unload();
+            new HarmonyLib.Harmony("QualityOfTerraria").UnpatchAll("QualityOfTerraria");
+            _contentReady = _patchesApplied = false;
             _context = null;
             _instance = null;
             _logger?.Info("QualityOfTerraria 已卸载。");
@@ -155,6 +166,7 @@ namespace QualityOfTerraria
             ToolNetwork.ResetSession();
             FeatureNetwork.ResetSession();
             Patches.StorageInventoryGuard.ResetSession();
+            Patches.WorldUIClickPatch.ResetSession();
             NetworkRuntime.ResetSession();
         }
 

@@ -4,7 +4,6 @@ using System.Reflection;
 using HarmonyLib;
 using Terraria;
 using QualityOfTerraria.Networking;
-using TerrariaModder.Core.UI;
 
 namespace QualityOfTerraria.Patches
 {
@@ -50,17 +49,6 @@ namespace QualityOfTerraria.Patches
                 yield return AccessTools.Method(typeof(WandsAndTools), "UpdateLiquidWand");
             }
             public static bool Prefix() => !Locked;
-        }
-
-        [HarmonyPatch]
-        internal static class CustomUIClickPatch
-        {
-            public static IEnumerable<MethodBase> TargetMethods()
-            {
-                yield return AccessTools.PropertyGetter(typeof(UIRenderer), "MouseLeftClick");
-                yield return AccessTools.PropertyGetter(typeof(UIRenderer), "MouseRightClick");
-            }
-            public static void Postfix(ref bool __result) { if (Locked) __result = false; }
         }
 
         [HarmonyPatch]

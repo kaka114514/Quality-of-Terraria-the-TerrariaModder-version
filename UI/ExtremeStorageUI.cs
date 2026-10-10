@@ -593,6 +593,13 @@ namespace QualityOfTerraria.UI
             if (!UIManager.CanRender || !IsOpen)
                 return;
 
+            if (Patches.StorageInventoryGuard.Locked)
+            {
+                UIRenderer.DrawPanel(PanelX, PanelY, PanelWidth, 64, 18, 22, 36, 240);
+                PanelLayout.DrawFittedText("物品操作等待确认：" + RemoteStorageOperations.Status, PanelX + 12, PanelY + 24, PanelWidth - 24, 255, 220, 120);
+                return;
+            }
+
             int mouseX = UIRenderer.MouseX;
             int mouseY = UIRenderer.MouseY;
             if (mouseX >= PanelX && mouseX <= PanelX + PanelWidth && mouseY >= PanelY && mouseY <= PanelY + PanelHeight)

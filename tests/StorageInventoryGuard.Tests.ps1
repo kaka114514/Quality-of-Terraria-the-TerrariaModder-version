@@ -2,6 +2,9 @@ $ErrorActionPreference = 'Stop'
 $path = Join-Path (Split-Path $PSScriptRoot) 'Patches/StorageInventoryGuard.cs'
 if (!(Test-Path $path)) { throw 'FAIL: 等待服务器期间仍可改变库存，缺少并发物品操作保护' }
 $source = Get-Content $path -Raw
+if ($source.Contains('CustomUIClickPatch') -or $source.Contains('PropertyGetter(typeof(UIRenderer), "MouseLeftClick")')) {
+    throw 'FAIL: 物品等待锁不应过滤加载器和其他模组的全局UI点击'
+}
 $stubs = @'
 using System;
 using System.Collections.Generic;

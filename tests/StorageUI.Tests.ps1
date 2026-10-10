@@ -40,6 +40,7 @@ public class Chest { public int x,y; public bool Marked=true; public string name
 public static class Main { public static Player[] player={new Player()}; public static Player LocalPlayer=player[0]; public static int myPlayer,netMode,maxChests=2; public static Item mouseItem; public static Chest[] chest={new Chest(),new Chest()}; public static bool mouseLeft,mouseLeftRelease; }
 public static class SoundEngine { public static void PlaySound(int id) {} }
 public static class RemoteStorageOperations { public static string Status = "服务器已确认"; public static bool RequestOpenChest(int index) { return true; } }
+public static class Patches { public static class StorageInventoryGuard { public static bool Locked; } }
 public static class SoundID { public const int Grab=1, MenuTick=2; }
 public static class MessageID { public const int SyncChestItem=1; }
 public static class NetMessage { public static void SendData(params object[] values) {} }

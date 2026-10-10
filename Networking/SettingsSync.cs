@@ -13,7 +13,7 @@ namespace QualityOfTerraria.Networking
     internal static class SettingsSync
     {
         private const string Prefix = "qot.settings.";
-        private const string Version = "1.1.0";
+        private const string Version = "1.1.1";
         private const int MaxRequests = 16;
         private static string _clientNonce, _room;
         private static int _lifecycle, _helloFrames;
@@ -225,7 +225,7 @@ namespace QualityOfTerraria.Networking
             {
                 using (var reader = Read(payload))
                 {
-                    if (reader.ReadString() != Version) { Reject(slot, "模组版本不一致，需使用 v1.1.0"); return; }
+                    if (reader.ReadString() != Version) { Reject(slot, "模组版本不一致，需使用 v" + Version); return; }
                     string nonce = reader.ReadString();
                     if (!Nonce(nonce)) return;
                     if (operation == Prefix + "hello")

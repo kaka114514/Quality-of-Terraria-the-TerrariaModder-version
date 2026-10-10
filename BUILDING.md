@@ -26,7 +26,7 @@
 | 存储交易、重复请求、身份及断线恢复 | `RemoteStorage.Transactions.Tests.ps1`、`RemoteStorage.Protocol.Tests.ps1`、`Review.RemoteStorage.MarkerIdentity.Tests.ps1`、`Review.RemoteStorage.Disconnect.Tests.ps1` |
 | 事务记录、鼠标物品与库存冻结 | `StorageTransactionJournal.Tests.ps1`、`StorageTransactionJournal.Native.Tests.ps1`、`StorageInventoryGuard.Tests.ps1`、`StorageCoins.Pending.Tests.ps1` |
 | 设置申请、保存核验与单机世界配置 | `SettingsSync.Tests.ps1`、`SettingsSyncCore.Tests.ps1`、`SettingsSyncSaveCore.Tests.ps1`、`LocalWorldSettings.Tests.ps1` |
-| 设置列表、刷怪滑条与旅商按钮 | `SettingsSyncUI.Tests.ps1`、`SpawnRateUI.Tests.ps1`、`TravelShopUI.Tests.ps1` |
+| 设置列表、刷怪滑条与旅商按钮 | `SettingsSyncUI.Tests.ps1`、`SpawnRateUI.Tests.ps1`、`TravelShopUI.Tests.ps1`、`WorldUIClick.Tests.ps1`、`WorldUIClick.Native.Tests.ps1`、`PatchLifecycle.Tests.ps1`、`UICompatibility.Native.Tests.ps1` |
 | 建造、液体与世界工具请求 | `ToolNetwork.Behavior.Tests.ps1`、`ToolNetwork.Native.Tests.ps1`、`Tools.Behavior.Tests.ps1`、`Tools.Contracts.Tests.ps1` |
 | 结构定位、测试假人与功能网络 | `FeatureNetwork.Behavior.Tests.ps1`、`FeatureNetwork.Native.Tests.ps1`、`FeatureNetwork.Dependencies.Tests.ps1` |
 | 既有存储、UI和生命周期回归 | `Storage.Tests.ps1`、`StorageBehavior.Tests.ps1`、`StorageUI.Tests.ps1`、`StorageCrafting.Tests.ps1`、`StorageIcon.Tests.ps1`、`StorageIcon.Drawing.Tests.ps1`、`PanelLayout.Tests.ps1`、`QuickPlacePreview.Tests.ps1`、`WorldSession.Tests.ps1`、`ModLifecycle.Tests.ps1`、`StartupLoadOrder.Tests.ps1` |

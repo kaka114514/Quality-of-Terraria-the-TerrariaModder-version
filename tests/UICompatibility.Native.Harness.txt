@@ -1,0 +1,136 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Reflection;
+using System.Reflection.Emit;
+using System.Runtime.CompilerServices;
+using HarmonyLib;
+using TerrariaModder.Core.Config;
+using TerrariaModder.Core.UI;
+
+public static class UICompatibilityCheck
+{
+    private static string capturedLabel, capturedDescription;
+    private static bool capturedClick;
+    private static Type localization;
+    private static readonly Harmony ui = new Harmony("qot.ui-compat.native.ui");
+    private static readonly Harmony vm = new Harmony("qot.ui-compat.native.vm");
+    private static bool bridge;
+
+    public static int Main(string[] args)
+    {
+        string game = "D:/App/Game/Steam/steamapps/common/Terraria";
+        AppDomain.CurrentDomain.AssemblyResolve += (sender, request) => {
+            string name = new AssemblyName(request.Name).Name + ".dll";
+            if (name == "Terraria.dll") return Assembly.LoadFrom(Path.Combine(game, "Terraria.exe"));
+            foreach (string dir in new[] { game, Path.Combine(game,"TerrariaModder/core"), Path.Combine(game,"TerrariaModder/core/deps"), Path.Combine(game,"TerrariaModder/mods/vein-miner") }) {
+                string path = Path.Combine(dir, name); if (File.Exists(path)) return Assembly.LoadFrom(path);
+            }
+            return null;
+        };
+        try { return Run(args[0], game); }
+        catch (Exception error) { Console.WriteLine(error); return 1; }
+    }
+
+    private static int Run(string mode, string game)
+    {
+        if (IntPtr.Size != 4) throw new Exception("Requires actual net48 x86 process");
+        Console.WriteLine("Runtime=" + Environment.Version + " PointerSize=" + IntPtr.Size + " Mode=" + mode);
+        bridge = mode == "early-bridge";
+        var vein = Assembly.LoadFrom(Path.Combine(game,"TerrariaModder/mods/vein-miner/VeinMiner.dll"));
+        localization = vein.GetType("VeinMiner.Localization", true);
+        vm.Patch(AccessTools.PropertyGetter(localization,"CurrentLanguage"), transpiler: new HarmonyMethod(typeof(UICompatibilityCheck), nameof(ChineseLanguage)));
+        var draw = AccessTools.Method(typeof(ModMenu), "DrawConfigProperty");
+        var tab = AccessTools.Method(typeof(ModMenu), "DrawConfigTab");
+        if (mode.StartsWith("late")) InstallVeinGetters(vein);
+        // "real" keeps the entire original Core body and patches only graphics APIs as spies.
+        // Other modes keep its label/tooltip IL call sites and control flow, then stop before controls.
+        if (mode.EndsWith("real"))
+        {
+            InstallGraphicsSpies();
+            ui.Patch(draw, prefix: new HarmonyMethod(typeof(UICompatibilityCheck), nameof(Passthrough)));
+        }
+        else ui.Patch(draw, prefix: new HarmonyMethod(typeof(UICompatibilityCheck), nameof(Passthrough)), transpiler: new HarmonyMethod(typeof(UICompatibilityCheck), nameof(CaptureMetadata)));
+        ui.Patch(tab, transpiler: new HarmonyMethod(typeof(UICompatibilityCheck), nameof(CaptureInput)));
+        if (!mode.StartsWith("late")) InstallVeinGetters(vein);
+        var meta = new ConfigPropertyMeta();
+        AccessTools.Field(typeof(ConfigPropertyMeta),"<Label>k__BackingField").SetValue(meta,"#vm.config.enabled.label");
+        AccessTools.Field(typeof(ConfigPropertyMeta),"<Description>k__BackingField").SetValue(meta,"#vm.config.enabled.desc");
+        string directLabel = (string)AccessTools.PropertyGetter(typeof(ConfigPropertyMeta),"Label").Invoke(meta,null);
+        string directDescription = (string)AccessTools.PropertyGetter(typeof(ConfigPropertyMeta),"Description").Invoke(meta,null);
+        try { draw.Invoke(null,new object[] { 0,0,300,meta,null,"vein-miner" }); }
+        catch (TargetInvocationException stop) { if (!mode.EndsWith("real") || stop.InnerException.Message != "fixture stops after actual label and tooltip") throw; }
+        Console.WriteLine("Getter Label=" + directLabel + " Description=" + directDescription);
+        Console.WriteLine("DrawConfigProperty Label=" + capturedLabel + " Description=" + capturedDescription);
+        if (directLabel != "启用模组" || directDescription != "总开关，关闭后所有功能停止工作") throw new Exception("Actual Vein postfix did not resolve Chinese text");
+        bool expectedTranslated = !mode.StartsWith("early") || bridge;
+        if ((capturedLabel == directLabel && capturedDescription == directDescription) != expectedTranslated) throw new Exception("Unexpected getter patch order result");
+        // MouseLeftClick has a protected region; test whether an already compiled Core
+        // tab still dispatches to a later replacement of this getter without touching Main.
+        vm.Patch(AccessTools.PropertyGetter(typeof(UIRenderer),"MouseLeftClick"), prefix: new HarmonyMethod(typeof(UICompatibilityCheck), nameof(ClickTrue)));
+        tab.Invoke(null,new object[] {0,0,100,100});
+        Console.WriteLine("Late MouseLeftClick patch observed by early DrawConfigTab=" + capturedClick);
+        if (!capturedClick) throw new Exception("UI click getter was inlined before late patch");
+        Console.WriteLine("PASS " + mode);
+        return 0;
+    }
+
+    private static void InstallVeinGetters(Assembly vein)
+    {
+        Type patches = vein.GetType("VeinMiner.VeinMinerPatches",true);
+        vm.Patch(AccessTools.PropertyGetter(typeof(ConfigPropertyMeta),"Label"), postfix: new HarmonyMethod(AccessTools.Method(patches,"ConfigPropertyLabelPostfix")));
+        vm.Patch(AccessTools.PropertyGetter(typeof(ConfigPropertyMeta),"Description"), postfix: new HarmonyMethod(AccessTools.Method(patches,"ConfigPropertyDescriptionPostfix")));
+    }
+    private static void InstallGraphicsSpies()
+    {
+        var core = typeof(ModMenu).Assembly;
+        ui.Patch(AccessTools.Method(typeof(UIRenderer),"IsMouseOver",new[] {typeof(int),typeof(int),typeof(int),typeof(int)}),prefix:new HarmonyMethod(typeof(UICompatibilityCheck),nameof(HoverPrefix)));
+        ui.Patch(AccessTools.Method(typeof(UIRenderer),"DrawRect",new[] {typeof(int),typeof(int),typeof(int),typeof(int),typeof(Color4)}),prefix:new HarmonyMethod(typeof(UICompatibilityCheck),nameof(SkipDrawing)));
+        ui.Patch(AccessTools.Method(core.GetType("TerrariaModder.Core.UI.Widgets.TextUtil"),"Truncate"),prefix:new HarmonyMethod(typeof(UICompatibilityCheck),nameof(TruncatePrefix)));
+        ui.Patch(AccessTools.Method(typeof(UIRenderer),"DrawTextShadow",new[] {typeof(string),typeof(int),typeof(int),typeof(Color4)}),prefix:new HarmonyMethod(typeof(UICompatibilityCheck),nameof(TextPrefix)));
+        ui.Patch(AccessTools.Method(core.GetType("TerrariaModder.Core.UI.Widgets.Tooltip"),"Set",new[] {typeof(string)}),prefix:new HarmonyMethod(typeof(UICompatibilityCheck),nameof(TooltipPrefix)));
+        ui.Patch(AccessTools.Method(typeof(ConfigPropertyMeta),"GetValue"),prefix:new HarmonyMethod(typeof(UICompatibilityCheck),nameof(StopAfterTooltip)));
+    }
+    private static bool HoverPrefix(ref bool __result) { __result=true; return false; }
+    private static bool SkipDrawing() { return false; }
+    private static bool TruncatePrefix(string __0, ref string __result) { __result=__0; return false; }
+    private static bool TextPrefix(string __0) { capturedLabel=__0; return false; }
+    private static bool TooltipPrefix(string __0) { capturedDescription=__0; return false; }
+    private static bool StopAfterTooltip() { throw new InvalidOperationException("fixture stops after actual label and tooltip"); }
+    private static IEnumerable<CodeInstruction> ChineseLanguage(IEnumerable<CodeInstruction> original) { yield return new CodeInstruction(OpCodes.Ldc_I4_1); yield return new CodeInstruction(OpCodes.Ret); }
+    private static bool ClickTrue(ref bool __result) { __result = true; return false; }
+    private static bool Passthrough() { return true; }
+    private static void StoreDescription(string value) { capturedDescription = value; }
+    private static void StoreClick(bool value) { capturedClick = value; }
+    private static bool Hover(int x, int y, int width, int height) { return true; }
+    private static void NoRectangle(int x, int y, int width, int height, Color4 color) { }
+    private static string NoTruncation(string text, int width) { return text; }
+    private static void CaptureText(string text, int x, int y, Color4 color) { capturedLabel = text; }
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static string LabelBridge(ConfigPropertyMeta meta) { return (string)AccessTools.PropertyGetter(typeof(ConfigPropertyMeta),"Label").Invoke(meta,null); }
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static string DescriptionBridge(ConfigPropertyMeta meta) { return (string)AccessTools.PropertyGetter(typeof(ConfigPropertyMeta),"Description").Invoke(meta,null); }
+    private static IEnumerable<CodeInstruction> CaptureMetadata(IEnumerable<CodeInstruction> original)
+    {
+        bool afterTooltip = false;
+        foreach (var instruction in original)
+        {
+            if (afterTooltip) { var stop = new CodeInstruction(OpCodes.Ret); stop.labels.AddRange(instruction.labels); yield return stop; yield break; }
+            var call = instruction.operand as MethodInfo;
+            if (call != null)
+            {
+                string replacement = call.Name == "IsMouseOver" ? nameof(Hover) : call.Name == "DrawRect" ? nameof(NoRectangle) : call.Name == "Truncate" ? nameof(NoTruncation) : call.Name == "DrawTextShadow" ? nameof(CaptureText) : call.Name == "Set" && call.DeclaringType.Name == "Tooltip" ? nameof(StoreDescription) : null;
+                if (replacement != null) { afterTooltip = replacement == nameof(StoreDescription); instruction.opcode = OpCodes.Call; instruction.operand = AccessTools.Method(typeof(UICompatibilityCheck),replacement); }
+                else if (bridge && call.DeclaringType == typeof(ConfigPropertyMeta) && (call.Name == "get_Label" || call.Name == "get_Description")) { instruction.opcode = OpCodes.Call; instruction.operand = AccessTools.Method(typeof(UICompatibilityCheck),call.Name == "get_Label" ? nameof(LabelBridge) : nameof(DescriptionBridge)); }
+            }
+            yield return instruction;
+        }
+        throw new Exception("Core tooltip boundary not found");
+    }
+    private static IEnumerable<CodeInstruction> CaptureInput(IEnumerable<CodeInstruction> original)
+    {
+        yield return new CodeInstruction(OpCodes.Call,AccessTools.PropertyGetter(typeof(UIRenderer),"MouseLeftClick"));
+        yield return new CodeInstruction(OpCodes.Call,AccessTools.Method(typeof(UICompatibilityCheck),nameof(StoreClick)));
+        yield return new CodeInstruction(OpCodes.Ret);
+    }
+}

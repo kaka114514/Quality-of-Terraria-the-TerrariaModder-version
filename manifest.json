@@ -1,10 +1,10 @@
 {
   "id": "quality-of-terraria",
   "name": "Quality of Terraria 更好的体验",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "framework_version": ">=0.4.1",
   "author": "487666123 / Ported for TerrariaModder",
-  "description": "提供全世界个人标记箱子的服务器远程存取、100格大背包、保留前缀的跨箱整理、设置同步申请，以及快速放置、液体吸放、自动钓鱼、服务器结构定位与个人假人DPS。联机需要房主／服务器和所有玩家安装同版本，世界设置由房主／管理员控制。",
+  "description": "移植自 tModLoader MOD 更好的体验",
   "entry_dll": "QualityOfTerraria.dll",
   "keybinds": [
     {
