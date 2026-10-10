@@ -1,0 +1,32 @@
+# Build output
+bin/
+obj/
+
+# Visual Studio / Rider / VSCode
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# Local dependencies, private history and assistant configuration
+lib/*.dll
+AGENTS.md
+CLAUDE.md
+.codex/
+.claude/
+.gemini/
+.antigravity/
+docs/
+*.log
+*.bak
+*.jsonl

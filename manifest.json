@@ -1,0 +1,96 @@
+{
+  "id": "quality-of-terraria",
+  "name": "Quality of Terraria 更好的体验",
+  "version": "1.0.0",
+  "framework_version": ">=0.4.1",
+  "author": "487666123 / Ported for TerrariaModder",
+  "description": "提供终极存储、100格大背包、分类与前缀搜索、保留前缀的跨箱合并整理，以及快速放置、快速铺墙、液体吸放、自动钓鱼、结构定位、假人DPS和角色属性面板。支持物品原版染色与动画，便利功能可在模组设置中调整。",
+  "entry_dll": "QualityOfTerraria.dll",
+  "keybinds": [
+    {
+      "id": "space-wand",
+      "label": "快速放置",
+      "description": "开启后手持方块、平台或墙，左键拖拽铺设，右键取消",
+      "default": "P"
+    },
+    {
+      "id": "liquid-wand",
+      "label": "液体魔杖模式切换",
+      "description": "循环切换关/水/岩浆/微光/蜂蜜，按住[;]吸收，按住[']生成",
+      "default": "L"
+    },
+    {
+      "id": "npc-home",
+      "label": "城镇NPC立即回家",
+      "description": "一键将所有城镇NPC召回各自房间",
+      "default": "N"
+    },
+    {
+      "id": "quick-nurse",
+      "label": "快捷护士瞬间治疗",
+      "description": "一键护士回满血与魔力并清除Debuff(按原版收费)",
+      "default": "H"
+    },
+    {
+      "id": "open-bank",
+      "label": "随身猪猪钱罐",
+      "description": "无需放置直接打开随身钱罐面板",
+      "default": "PERIOD"
+    },
+    {
+      "id": "super-vault",
+      "label": "随身大背包",
+      "description": "呼出100格额外随身独立仓库",
+      "default": "B"
+    },
+    {
+      "id": "wall-wand",
+      "label": "快速铺墙",
+      "description": "使用背包中的背景墙，快速铺满周围无墙区域",
+      "default": "O"
+    },
+    {
+      "id": "weather-control",
+      "label": "切换晴雨",
+      "description": "切换下雨和放晴",
+      "default": "U"
+    },
+    {
+      "id": "extreme-storage",
+      "label": "终极存储大面板",
+      "description": "呼出集中仓储大面板，支持分类浏览与存取",
+      "default": "K"
+    },
+    {
+      "id": "player-stats",
+      "label": "角色实时属性面板",
+      "description": "实时监控各项攻防暴击穿透属性",
+      "default": "Y"
+    },
+    {
+      "id": "structure-locator",
+      "label": "小地图结构定位球",
+      "description": "打开小地图结构定位面板，快速扫描定位并点亮迷雾",
+      "default": "G"
+    },
+    {
+      "id": "spawn-rate-control",
+      "label": "刷怪率与节日控制",
+      "description": "调节0～30倍刷怪率及节日、世界特性；联机由服务器控制",
+      "default": "OPENBRACKET"
+    },
+    {
+      "id": "autofisher",
+      "label": "自动钓鱼机",
+      "description": "背包内有可用鱼竿及鱼饵，在液体附近启用，每10秒尝试一次原版钓鱼结算",
+      "default": "Z"
+    },
+    {
+      "id": "target-dummy",
+      "label": "测试假人桩",
+      "description": "在鼠标处放置或移除测试假人，实时统计DPS",
+      "default": "X"
+    }
+  ],
+  "multiplayer": "optional"
+}
