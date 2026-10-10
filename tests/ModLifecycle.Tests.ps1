@@ -15,17 +15,30 @@ $methods = @('public void OnWorldLoad()', 'public void OnWorldUnload()', 'privat
 $harness = @'
 using System;
 using Terraria;
-namespace Terraria { public static class Main { public static bool gameMenu, dedServ; } }
+using QualityOfTerraria.Networking;
+namespace Terraria { public static class Main { public static bool gameMenu, dedServ; public static int netMode; } }
+namespace QualityOfTerraria.Networking {
+    public static class RemoteStorageOperations { public static void Initialize() {} public static void ResetSession() {} }
+    public static class SettingsSync { public static void Initialize() {} public static void ResetSession() {} }
+    public static class ToolNetwork { public static void Initialize() {} public static void ResetSession() {} }
+    public static class FeatureNetwork { public static void Initialize() {} public static void ResetSession() {} }
+    public static class NetworkRuntime { public static void ResetSession() {} }
+    public static class LocalWorldSettings { public static void Restore() {} }
+    public static class StorageTransactionJournal { public static void EndServerSession() {} }
+}
+namespace QualityOfTerraria.Patches { public static class StorageInventoryGuard { public static void ResetSession() {} } }
 namespace QualityOfTerraria {
     public class Logger { public void Info(string text) {} }
     public class Mod {
         public static bool WorldActive;
         private Logger _logger = new Logger();
+        private bool _serverSession;
         __METHODS__
     }
     public static class EventLog { public static string Value = ""; }
 }
 namespace QualityOfTerraria.UI {
+    public static class RemoteStorageSnapshots { public static void Initialize() {} }
     public static class UIManager { public static void ResetSession() { EventLog.Value += "reset,"; } }
     public static class SuperVaultUI {
         public static void EnsureLoadedForCurrentPlayer() { EventLog.Value += "vault-load,"; }

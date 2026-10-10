@@ -63,6 +63,11 @@ namespace TerrariaModder.Core.Net {
 namespace QualityOfTerraria {
  public static class Mod { public static void LogError(string s, Exception e) { throw new Exception(s, e); } }
 }
+namespace QualityOfTerraria.Networking {
+ public static class NetworkRuntime { public static void Enqueue(Action a) { a(); } }
+ public static class RemoteStorageOperations { public static bool Ready=true, Busy; }
+ public static class ServerMarkedChests { public static bool IsMarked(int client,Terraria.Chest chest) { return QualityOfTerraria.UI.ExtremeStorageUI.Keys.Contains(((long)chest.x<<32)|(uint)chest.y); } }
+}
 namespace QualityOfTerraria.UI {
  public static class UIManager { public static bool CanRender = true; }
  public static class PanelLayout {

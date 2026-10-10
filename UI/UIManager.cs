@@ -22,6 +22,7 @@ namespace QualityOfTerraria.UI
             RegisterDraw(BuffAndSpawnRateUI.PanelId, BuffAndSpawnRateUI.Draw);
             RegisterDraw(StructureLocatorUI.PanelId, StructureLocatorUI.Draw);
             RegisterDraw(HudOverlayId, DrawHUDOverlay);
+            RegisterDraw(TravelShopRefreshUI.PanelId, TravelShopRefreshUI.Draw);
             SuperVaultUI.Initialize();
         }
 
@@ -45,6 +46,7 @@ namespace QualityOfTerraria.UI
             PlayerStatsUI.Update();
             BuffAndSpawnRateUI.Update();
             StructureLocatorUI.Update();
+            TravelShopRefreshUI.Update();
             StructureLocator.Update();
             WandsAndTools.UpdateQuickPlace();
             WandsAndTools.UpdateLiquidWand();
@@ -59,6 +61,7 @@ namespace QualityOfTerraria.UI
             PlayerStatsUI.ResetSession();
             BuffAndSpawnRateUI.ResetSession();
             StructureLocatorUI.ResetSession();
+            TravelShopRefreshUI.ResetSession();
             WandsAndTools.ResetSession();
             Autofisher.ResetSession();
             TargetDummySystem.ResetSession();
@@ -76,6 +79,7 @@ namespace QualityOfTerraria.UI
             UIRenderer.UnregisterPanelDraw(BuffAndSpawnRateUI.PanelId);
             UIRenderer.UnregisterPanelDraw(StructureLocatorUI.PanelId);
             UIRenderer.UnregisterPanelDraw(HudOverlayId);
+            UIRenderer.UnregisterPanelDraw(TravelShopRefreshUI.PanelId);
             _initialized = false;
         }
 

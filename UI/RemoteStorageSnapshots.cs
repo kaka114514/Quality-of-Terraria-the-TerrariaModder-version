@@ -4,6 +4,7 @@ using System.IO;
 using Terraria;
 using Terraria.ID;
 using TerrariaModder.Core.Net;
+using QualityOfTerraria.Networking;
 
 namespace QualityOfTerraria.UI
 {
@@ -19,6 +20,8 @@ namespace QualityOfTerraria.UI
         private static string _pendingToken;
         private static readonly HashSet<long> _pendingKeys = new HashSet<long>();
         private static ulong _requestFrame, _refreshFrame;
+        private static Action<int, string, string> _onRequest;
+        private static Action<bool, string, string> _onResponse;
         internal static string Status { get; private set; } = "远程箱子快照尚未确认";
 
         internal static void Initialize()
@@ -26,16 +29,27 @@ namespace QualityOfTerraria.UI
             if (_initialized) return;
             _initialized = true;
             _session = Guid.NewGuid().ToString("N");
-            NetSync.OnStorageRequest += HandleRequest;
-            NetSync.OnStorageResponse += HandleResponse;
+            string session = _session;
+            _onRequest = (client, operation, payload) =>
+            {
+                if (operation != Operation) return;
+                NetworkRuntime.Enqueue(() => { if (_session == session) HandleRequest(client, operation, payload); });
+            };
+            _onResponse = (success, operation, payload) =>
+            {
+                if (operation != Operation) return;
+                NetworkRuntime.Enqueue(() => { if (_session == session) HandleResponse(success, operation, payload); });
+            };
+            NetSync.OnStorageRequest += _onRequest;
+            NetSync.OnStorageResponse += _onResponse;
         }
 
         internal static void ResetSession()
         {
             if (_initialized)
             {
-                NetSync.OnStorageRequest -= HandleRequest;
-                NetSync.OnStorageResponse -= HandleResponse;
+                NetSync.OnStorageRequest -= _onRequest;
+                NetSync.OnStorageResponse -= _onResponse;
             }
             _initialized = _pending = false;
             _chests.Clear();
@@ -57,7 +71,7 @@ namespace QualityOfTerraria.UI
 
         internal static void Update()
         {
-            if (!_initialized || Main.netMode != 1 || !UIManager.CanRender) return;
+            if (!_initialized || Main.netMode != 1 || !UIManager.CanRender || !RemoteStorageOperations.Ready || RemoteStorageOperations.Busy) return;
             if (_pending)
             {
                 if (Main.GameUpdateCount - _requestFrame < 300) return;
@@ -114,7 +128,7 @@ namespace QualityOfTerraria.UI
                         int index = x >= 0 && x < Main.maxTilesX && y >= 0 && y < Main.maxTilesY ? Chest.FindChest(x, y) : -1;
                         Chest chest = index >= 0 ? Main.chest[index] : null;
                         int owner = index >= 0 ? Chest.UsingChest(index) : -1;
-                        bool available = chest != null && !Chest.IsLocked(x, y) && (owner < 0 || owner == client);
+                        bool available = chest != null && ServerMarkedChests.IsMarked(client, chest) && !Chest.IsLocked(x, y) && (owner < 0 || owner == client);
                         writer.Write(available ? index : -1);
                         if (!available) continue;
                         writer.Write(chest.name ?? "");

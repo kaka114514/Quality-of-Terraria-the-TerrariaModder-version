@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $source = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\UI\UIManager.cs') -Raw -Encoding UTF8
-$panels = @('ExtremeStorageUI', 'SuperVaultUI', 'PlayerStatsUI', 'BuffAndSpawnRateUI', 'StructureLocatorUI')
+$panels = @('ExtremeStorageUI', 'SuperVaultUI', 'PlayerStatsUI', 'BuffAndSpawnRateUI', 'StructureLocatorUI', 'TravelShopRefreshUI')
 $panelStubs = ($panels | ForEach-Object { @"
 public static class $_ {
     public const string PanelId = "$_";
@@ -66,7 +66,7 @@ namespace QualityOfTerraria.UI {
             Check(Counter.Draws == 0, "未加载世界不绘制功能窗口");
             Counter.Draws = 0; Mod.WorldActive = true;
             DrawAll();
-            Check(Counter.Draws == 6, "有效世界仍绘制五个窗口和工具HUD");
+            Check(Counter.Draws == 7, "有效世界绘制功能窗口、旅商入口和工具HUD");
             Terraria.Main.dedServ = true; Counter.Resets = 0; Counter.Draws = 0;
             UIManager.UpdateAll(); DrawAll();
             Check(Counter.Resets == 0 && Counter.Draws == 0, "专服不绘制且保留快照服务会话");
@@ -86,7 +86,7 @@ namespace QualityOfTerraria.UI {
             UIManager.Unload();
             Check(TerrariaModder.Core.UI.UIRenderer.Draws.Count == 0, "卸载移除全部本模组绘制回调");
             UIManager.Initialize();
-            Check(TerrariaModder.Core.UI.UIRenderer.Draws.Count == 6, "重载只注册一份绘制回调");
+            Check(TerrariaModder.Core.UI.UIRenderer.Draws.Count == 7, "重载只注册一份绘制回调");
             if (failures > 0) throw new System.Exception(failures + " 项生命周期回归失败");
         }
     }

@@ -1,0 +1,28 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using HarmonyLib;
+public static class AllPatchesCheck {
+ public static int Main() {
+  string root=AppDomain.CurrentDomain.BaseDirectory;
+  string game="D:/App/Game/Steam/steamapps/common/Terraria";
+  AppDomain.CurrentDomain.AssemblyResolve+=(sender,args)=>{
+   string name=new AssemblyName(args.Name).Name+".dll";
+   if(name=="Terraria.dll")return Assembly.LoadFrom(Path.Combine(game,"Terraria.exe"));
+   foreach(string path in new[]{Path.Combine(root,name),Path.Combine(game,name),Path.Combine(game,"TerrariaModder/core",name),Path.Combine(game,"TerrariaModder/core/deps",name),Path.Combine(Environment.GetEnvironmentVariable("QOT_SOURCE_ROOT"),"lib",name)})if(File.Exists(path))return Assembly.LoadFrom(path);
+   return null;
+  };
+  var production=Assembly.LoadFrom(Path.Combine(root,"QualityOfTerraria.dll"));
+  var harmony=new Harmony("qot.v110.all-native-check");int checks=0,failed=0;
+  foreach(Type patch in production.GetTypes().Where(t=>t.GetCustomAttributes(typeof(HarmonyPatch),false).Length>0)) {
+   checks++;try {
+    var targets=harmony.CreateClassProcessor(patch).Patch();
+    if(targets==null||targets.Count==0)throw new Exception("没有挂接目标");
+    if(harmony.GetPatchedMethods().Any(t=>t.DeclaringType!=null&&t.DeclaringType.FullName=="Terraria.Player"&&t.Name=="Hurt"))throw new Exception("禁止Player.Hurt浮点返回补丁");
+    Console.WriteLine("PASS "+patch.FullName+" "+targets.Count);
+   } catch(Exception e){failed++;Console.WriteLine("FAIL "+patch.FullName+" "+e);}
+  }
+  Console.WriteLine("全部真实1.4.5.8 x86 Harmony挂接："+(checks-failed)+"/"+checks+"（未启动游戏）");return failed;
+ }
+}

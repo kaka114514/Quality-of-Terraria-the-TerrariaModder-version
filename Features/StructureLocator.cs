@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using Microsoft.Xna.Framework;
@@ -20,6 +20,8 @@ namespace QualityOfTerraria.Features
         private static float _closestDistance;
         private static Vector2 _origin;
         private const int TilesPerFrame = 8192;
+        private static Action<Point?> _complete;
+        private static bool _remotePending;
 
         public static string GetStructureName(StructureType type)
         {
@@ -44,22 +46,30 @@ namespace QualityOfTerraria.Features
         {
             Player player = Main.LocalPlayer;
             if (Main.gameMenu || player == null || !player.active || Main.tile == null) return false;
+            if (Main.netMode == 1) return Networking.FeatureNetwork.RequestLocator(type);
+            if (Main.netMode == 2) return false;
+            StartScan(type, player.Center, null);
+            return true;
+        }
+
+        internal static void StartScan(StructureType type, Vector2 origin, Action<Point?> complete)
+        {
             ResetSession();
+            _complete = complete;
             _type = type;
-            _origin = player.Center;
+            _origin = origin;
             _width = Main.maxTilesX;
             _height = Main.maxTilesY;
             Point? direct = FindKnownPosition(type);
-            if (direct.HasValue) { Finish(direct); return true; }
+            if (direct.HasValue) { Finish(direct); return; }
             IsScanning = true;
-            Main.NewText($"【结构定位】正在扫描 {GetStructureName(type)}…", 100, 240, 255);
-            return true;
+            if (Main.netMode != 2) Main.NewText($"【结构定位】正在扫描 {GetStructureName(type)}…", 100, 240, 255);
         }
 
         public static void Update()
         {
-            if (!IsScanning) return;
-            if (Main.gameMenu || Main.tile == null || Main.maxTilesX != _width || Main.maxTilesY != _height) { ResetSession(); return; }
+            if (!IsScanning || _remotePending) return;
+            if (!Mod.WorldActive || (Main.gameMenu && !Main.dedServ) || Main.tile == null || Main.maxTilesX != _width || Main.maxTilesY != _height) { ResetSession(); return; }
             int total = _width * _height;
             Stopwatch clock = Stopwatch.StartNew();
             for (int count = 0; count < TilesPerFrame && _nextTile < total; count++)
@@ -87,6 +97,24 @@ namespace QualityOfTerraria.Features
             _nextTile = 0;
             _closest = null;
             _closestDistance = float.MaxValue;
+            _complete = null;
+            _remotePending = false;
+        }
+
+        internal static void AwaitServer()
+        {
+            ResetSession();
+            _remotePending = IsScanning = true;
+        }
+
+        internal static void ReceiveServerResult(StructureType type, Point? target)
+        {
+            ResetSession();
+            _type = type;
+            _origin = Main.LocalPlayer.Center;
+            _width = Main.maxTilesX;
+            _height = Main.maxTilesY;
+            Finish(target);
         }
 
         private static Point? FindKnownPosition(StructureType type)
@@ -135,9 +163,17 @@ namespace QualityOfTerraria.Features
         {
             IsScanning = false;
             ScanProgress = 1f;
+            if (_complete != null)
+            {
+                Action<Point?> callback = _complete;
+                _complete = null;
+                callback(target);
+                return;
+            }
+            if (Main.netMode == 2) return;
             if (!target.HasValue)
             {
-                string scope = Main.netMode == 1 ? "已同步的世界区域" : "当前世界";
+                string scope = "当前世界";
                 Main.NewText($"【结构定位】未能在{scope}中找到 {GetStructureName(_type)}！", 255, 120, 120);
                 return;
             }

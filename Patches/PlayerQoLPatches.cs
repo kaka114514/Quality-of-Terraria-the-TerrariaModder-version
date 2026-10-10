@@ -18,6 +18,7 @@ namespace QualityOfTerraria.Patches
         {
             public static void Postfix(Player __instance, int i)
             {
+                if (StorageInventoryGuard.Locked) return;
                 if (Mod.Config == null || !Mod.Config.AutoSaveCoins || __instance == null || __instance.bank?.item == null)
                     return;
 
@@ -104,7 +105,7 @@ namespace QualityOfTerraria.Patches
                 }
 
                 // 消除伤害浮动 (原生支持，彻底避免对高频伤害函数进行拦截)
-                Terraria.Testing.DebugOptions.NoDamageVar = Mod.Config.NoDamageVariance;
+                if (Main.netMode != 1) Terraria.Testing.DebugOptions.NoDamageVar = Mod.Config.NoDamageVariance;
             }
         }
 
@@ -116,10 +117,10 @@ namespace QualityOfTerraria.Patches
             {
                 if (!Mod.WorldActive || Mod.Config == null || __instance == null || !__instance.active || __instance.whoAmI != Main.myPlayer)
                     return;
-                if (Mod.Config.ExtraTileReach)
+                if (Mod.Config.ExtraTileReach > 0)
                 {
-                    Player.tileRangeX += 5;
-                    Player.tileRangeY += 5;
+                    Player.tileRangeX += Math.Min(30, Mod.Config.ExtraTileReach);
+                    Player.tileRangeY += Math.Min(30, Mod.Config.ExtraTileReach);
                 }
                 if (Mod.Config.FastToolSpeed)
                 {
@@ -200,21 +201,16 @@ namespace QualityOfTerraria.Patches
         {
             public static void Postfix(ref int __result)
             {
-                if (Mod.Config != null && Mod.Config.QuickRespawn)
-                {
-                    // 若无 Boss 存活，设置为 90 帧 (1.5 秒)
-                    if (!AnyBossAlive())
-                    {
-                        __result = 90;
-                    }
-                }
+                if (Mod.Config != null && (AnyBossAlive() ? Mod.Config.BossQuickRespawn : Mod.Config.QuickRespawn))
+                    __result = 90;
             }
 
             private static bool AnyBossAlive()
             {
                 for (int i = 0; i < Main.maxNPCs; i++)
                 {
-                    if (Main.npc[i] != null && Main.npc[i].active && (Main.npc[i].boss || Main.npc[i].type == NPCID.EaterofWorldsHead))
+                    if (Main.npc[i] != null && Main.npc[i].active && (Main.npc[i].boss ||
+                        Main.npc[i].type == NPCID.EaterofWorldsHead || Main.npc[i].type == NPCID.EaterofWorldsBody || Main.npc[i].type == NPCID.EaterofWorldsTail))
                         return true;
                 }
                 return false;

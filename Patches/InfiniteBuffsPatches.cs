@@ -3,6 +3,7 @@ using HarmonyLib;
 using Terraria;
 using Terraria.ID;
 using Terraria.GameContent;
+using QualityOfTerraria.Networking;
 
 namespace QualityOfTerraria.Patches
 {
@@ -18,11 +19,13 @@ namespace QualityOfTerraria.Patches
             if (__instance.whoAmI != Main.myPlayer && Main.netMode != 2)
                 return;
 
-            bool infinitePotions = Mod.Config.InfinitePotions;
-            bool infiniteStations = Mod.Config.InfiniteStationsAndBanners;
-            int req = Mod.Config.PotionStackRequirement;
+            var config = SettingsSync.GetPlayerConfig(__instance.whoAmI);
+            if (config == null) return;
+            bool infinitePotions = config.InfinitePotions;
+            bool infiniteStations = config.InfiniteStationsAndBanners;
+            int req = config.PotionStackRequirement;
 
-            if (!infinitePotions && !infiniteStations)
+            if (!infinitePotions && !infiniteStations && !config.InfiniteRedPotion)
                 return;
 
             foreach (var item in GetAllPlayerItems(__instance))
@@ -31,11 +34,13 @@ namespace QualityOfTerraria.Patches
                     continue;
 
                 // 1. 无限药水
-                if (infinitePotions && item.buffType > 0 && item.consumable && item.stack >= req)
+                if (infinitePotions && item.type != ItemID.RedPotion && item.buffType > 0 && !Main.debuff[item.buffType] && item.consumable && item.stack >= req)
                 {
                     // 给玩家施加 2 秒增益，每帧刷新
                     __instance.AddBuff(item.buffType, 120, false);
                 }
+
+                RedPotionPatches.ApplyInfiniteBuffsForPlayer(__instance, item, config);
 
                 // 2. 随身增益站与旗帜
                 if (infiniteStations)
@@ -142,7 +147,7 @@ namespace QualityOfTerraria.Patches
                 }
             }
 
-            foreach (Chest chest in QualityOfTerraria.UI.ExtremeStorageUI.GetMarkedReadableChests())
+            foreach (Chest chest in RemoteStorageOperations.GetMarkedReadableChests(player))
                 foreach (Item item in chest.item)
                     if (item != null && !item.IsAir) yield return item;
         }
@@ -154,7 +159,7 @@ namespace QualityOfTerraria.Patches
     {
         public static void Postfix(Player __instance, int bannerType, ref bool __result)
         {
-            if (__result || Mod.Config?.InfiniteStationsAndBanners != true || bannerType <= 0 || bannerType >= BannerSystem.MaxBannerTypes) return;
+            if (__result || SettingsSync.GetPlayerConfig(__instance.whoAmI)?.InfiniteStationsAndBanners != true || bannerType <= 0 || bannerType >= BannerSystem.MaxBannerTypes) return;
             int itemType = BannerSystem.BannerToItem(bannerType);
             foreach (Item item in InfiniteBuffsPatches.GetAllPlayerItems(__instance))
                 if (item.type == itemType) { __result = true; return; }

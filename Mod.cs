@@ -3,6 +3,7 @@ using TerrariaModder.Core;
 using TerrariaModder.Core.Logging;
 using TerrariaModder.Core.Events;
 using Terraria;
+using QualityOfTerraria.Networking;
 
 namespace QualityOfTerraria
 {
@@ -13,6 +14,7 @@ namespace QualityOfTerraria
         private static Mod _instance;
         private ModContext _context;
         private ILogger _logger;
+        private bool _serverSession;
 
         public override void Initialize(ModContext context)
         {
@@ -20,6 +22,7 @@ namespace QualityOfTerraria
             _instance = this;
             _context = context;
             Config = context.GetConfig<QualityOfTerrariaConfig>();
+            LocalWorldSettings.Initialize();
 
             // 注册常用快捷键（严格对应用户指定键位，杜绝占用 F6~F12）
             context.RegisterKeybind("space-wand", "快速放置", "切换快速放置，开启后手持方块/平台/墙按住鼠标左键拖拽铺设", "P", WandsAndTools.ExecuteQuickPlace);
@@ -37,12 +40,13 @@ namespace QualityOfTerraria
             context.RegisterKeybind("extreme-storage", "终极存储大面板", "呼出集中仓储大面板，支持分类浏览与存取", "K", UI.ExtremeStorageUI.Toggle);
             context.RegisterKeybind("player-stats", "角色实时属性面板", "实时监控各项攻防暴击穿透属性", "Y", UI.PlayerStatsUI.Toggle);
             context.RegisterKeybind("structure-locator", "小地图结构定位球", "打开小地图结构定位面板，快速扫描定位并点亮迷雾", "G", UI.StructureLocatorUI.Toggle);
-            context.RegisterKeybind("spawn-rate-control", "刷怪率与节日控制", "调节0～30倍刷怪率及节日、世界特性；联机由服务器控制", "OPENBRACKET", UI.BuffAndSpawnRateUI.Toggle);
+            context.RegisterKeybind("spawn-rate-control", "刷怪率与节日控制", "调节0～100倍刷怪率及节日、世界特性；联机由服务器控制", "OPENBRACKET", UI.BuffAndSpawnRateUI.Toggle);
             context.RegisterKeybind("autofisher", "自动钓鱼机", "背包内有可用鱼竿及鱼饵，在液体附近启用，每10秒尝试一次原版钓鱼结算", "Z", Features.Autofisher.Toggle);
             context.RegisterKeybind("target-dummy", "测试假人桩", "在鼠标处放置或移除测试假人，实时统计DPS", "X", Features.TargetDummySystem.ToggleOrSpawnAtCursor);
 
             UI.UIManager.Initialize();
             FrameEvents.OnPreUpdate += CheckWorldSession;
+            FrameEvents.OnPreUpdate += UpdateNetworkSession;
             GameEvents.OnWorldSave += SaveSession;
             GameEvents.OnReturnToMenu += EndSession;
 
@@ -82,6 +86,13 @@ namespace QualityOfTerraria
         {
             UI.UIManager.ResetSession();
             WorldActive = true;
+            _serverSession = Main.netMode == 2;
+            if (Main.netMode == 0) LocalWorldSettings.Restore();
+            RemoteStorageOperations.Initialize();
+            SettingsSync.Initialize();
+            ToolNetwork.Initialize();
+            FeatureNetwork.Initialize();
+            UI.RemoteStorageSnapshots.Initialize();
             UI.SuperVaultUI.EnsureLoadedForCurrentPlayer();
             UI.ExtremeStorageUI.EnsureLoadedForCurrentWorld();
             _logger?.Info("QualityOfTerraria: 世界已加载，已按存档身份尝试读取大背包与箱子标记。");
@@ -96,9 +107,14 @@ namespace QualityOfTerraria
         {
             EndSession();
             FrameEvents.OnPreUpdate -= CheckWorldSession;
+            FrameEvents.OnPreUpdate -= UpdateNetworkSession;
             GameEvents.OnWorldSave -= SaveSession;
             GameEvents.OnReturnToMenu -= EndSession;
             UI.UIManager.Unload();
+            RemoteStorageOperations.Unload();
+            SettingsSync.Unload();
+            ToolNetwork.Unload();
+            FeatureNetwork.Unload();
             _context = null;
             _instance = null;
             _logger?.Info("QualityOfTerraria 已卸载。");
@@ -107,6 +123,17 @@ namespace QualityOfTerraria
         private void CheckWorldSession()
         {
             if (WorldActive && !Main.dedServ && Main.gameMenu) EndSession();
+        }
+
+        public void OnConfigChanged()
+        {
+            if (Config == null || Main.netMode != 0) return;
+            string error;
+            if (!LocalWorldSettings.Save(out error))
+            {
+                LocalWorldSettings.Restore();
+                Main.NewText(error + "，世界设置已恢复原值。", 255, 140, 100);
+            }
         }
 
         private void SaveSession()
@@ -121,6 +148,25 @@ namespace QualityOfTerraria
             SaveSession();
             WorldActive = false;
             UI.UIManager.ResetSession();
+            if (_serverSession) StorageTransactionJournal.EndServerSession();
+            _serverSession = false;
+            RemoteStorageOperations.ResetSession();
+            SettingsSync.ResetSession();
+            ToolNetwork.ResetSession();
+            FeatureNetwork.ResetSession();
+            Patches.StorageInventoryGuard.ResetSession();
+            NetworkRuntime.ResetSession();
+        }
+
+        private void UpdateNetworkSession()
+        {
+            if (!WorldActive) return;
+            NetworkRuntime.Update();
+            RemoteStorageOperations.Update();
+            SettingsSync.Update();
+            ToolNetwork.Update();
+            FeatureNetwork.Update();
+            Patches.StorageInventoryGuard.Update();
         }
 
         public static void LogError(string message, Exception exception)

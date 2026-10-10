@@ -1,10 +1,10 @@
 {
   "id": "quality-of-terraria",
   "name": "Quality of Terraria 更好的体验",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "framework_version": ">=0.4.1",
   "author": "487666123 / Ported for TerrariaModder",
-  "description": "提供终极存储、100格大背包、分类与前缀搜索、保留前缀的跨箱合并整理，以及快速放置、快速铺墙、液体吸放、自动钓鱼、结构定位、假人DPS和角色属性面板。支持物品原版染色与动画，便利功能可在模组设置中调整。",
+  "description": "提供全世界个人标记箱子的服务器远程存取、100格大背包、保留前缀的跨箱整理、设置同步申请，以及快速放置、液体吸放、自动钓鱼、服务器结构定位与个人假人DPS。联机需要房主／服务器和所有玩家安装同版本，世界设置由房主／管理员控制。",
   "entry_dll": "QualityOfTerraria.dll",
   "keybinds": [
     {
@@ -76,7 +76,7 @@
     {
       "id": "spawn-rate-control",
       "label": "刷怪率与节日控制",
-      "description": "调节0～30倍刷怪率及节日、世界特性；联机由服务器控制",
+      "description": "调节0～100倍刷怪率及节日、世界特性；联机由房主／管理员提交",
       "default": "OPENBRACKET"
     },
     {
@@ -92,5 +92,5 @@
       "default": "X"
     }
   ],
-  "multiplayer": "optional"
+  "multiplayer": "required"
 }

@@ -6,23 +6,37 @@ using HarmonyLib;
 using Terraria;
 using Terraria.Enums;
 using Terraria.ID;
+using System.Linq;
+using TerrariaModder.Core.Config;
+using TerrariaModder.Core.Net;
+using QualityOfTerraria.Networking;
 
 namespace QualityOfTerraria.Patches
 {
     public static class WorldQoLCompletionPatches
     {
-        private static float? _spawnRateOverride;
-        public static float SpawnRateMultiplier => _spawnRateOverride ?? (Mod.Config?.SpawnRateMultiplier ?? 1f);
-        public static string SpawnRateStatus => Main.netMode == 1 ? "联机客户端：由服务器控制" : $"当前倍率：{SpawnRateMultiplier:0.##}x";
+        public static float SpawnRateMultiplier => Mod.Config?.SpawnRateMultiplier ?? 1f;
+        public static string SpawnRateStatus => Main.netMode == 1 ? NetSync.LocalPlayerIsAdmin ? "房间规则：管理员可调整" : "房间规则：由房主／管理员调整" : $"当前倍率：{SpawnRateMultiplier:0.##}x";
 
         public static bool SetSpawnRate(float multiplier)
         {
             if (Main.netMode == 1) return false;
-            _spawnRateOverride = Math.Max(0f, Math.Min(30f, multiplier));
+            if (Mod.Config == null || float.IsNaN(multiplier) || float.IsInfinity(multiplier)) return false;
+            float previous = Mod.Config.SpawnRateMultiplier;
+            Mod.Config.SpawnRateMultiplier = Math.Max(0f, Math.Min(100f, multiplier));
+            string error;
+            bool saved = Main.netMode == 2 ? ConfigManager.GetCurrentScope() == ConfigScope.Server && SettingsSync.SaveVerified(Mod.Config, out error)
+                : LocalWorldSettings.Save(out error);
+            if (!saved) { Mod.Config.SpawnRateMultiplier = previous; return false; }
+            if (Main.netMode == 2)
+            {
+                var metadata = Mod.Config.GetPropertyMetadata().First(p => p.Property.Name == nameof(QualityOfTerrariaConfig.SpawnRateMultiplier));
+                NetSync.BroadcastConfigChange("quality-of-terraria", metadata, Mod.Config, -1);
+            }
             return true;
         }
 
-        public static void ResetSession() { _spawnRateOverride = null; }
+        public static void ResetSession() { }
 
         internal static void ScaleSpawnRate(ref int spawnRate, ref int maxSpawns, float multiplier)
         {

@@ -7,6 +7,7 @@ using Terraria.Audio;
 using Terraria.ID;
 using TerrariaModder.Core.UI;
 using TerrariaModder.Core.UI.Widgets;
+using QualityOfTerraria.Networking;
 
 namespace QualityOfTerraria.UI
 {
@@ -151,6 +152,57 @@ namespace QualityOfTerraria.UI
             return Main.netMode != 1 || Main.LocalPlayer.chest == index;
         }
 
+        internal static bool MatchesStorageTab(Item item, StorageTab tab) => MatchesTab(item, tab);
+        internal static void SortStorageItems(Item[] items, ItemSortMode mode)
+            => Array.Sort(items, (a, b) => CompareItems(a, b, mode == ItemSortMode.Default ? ItemSortMode.Rarity : mode));
+
+        internal static void AcceptServerMarks(string world, string owner, IEnumerable<long> marks)
+        {
+            _loadedWorldName = world + "." + owner;
+            string directory = Path.Combine(Main.SavePath, "TerrariaModder", "world-data");
+            _loadedPath = Path.Combine(directory, _loadedWorldName + ".markedchests.dat");
+            string legacy = Path.Combine(directory, world + ".markedchests.dat");
+            if (!File.Exists(_loadedPath) && !File.Exists(_loadedPath + ".bak") && (File.Exists(legacy) || File.Exists(legacy + ".bak")))
+            {
+                // 旧世界共用文件只迁给首次认领的玩家，后来换角色／身份不能自动继承。
+                try
+                {
+                    bool owns = false;
+                    string claim = legacy + ".owner";
+                    try
+                    {
+                        using (var stream = new FileStream(claim, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                        using (var writer = new StreamWriter(stream)) { writer.Write(owner); writer.Flush(); stream.Flush(true); }
+                        owns = true;
+                    }
+                    catch (IOException) { owns = File.Exists(claim) && File.ReadAllText(claim) == owner; }
+                    if (owns)
+                    {
+                        if (File.Exists(legacy)) File.Copy(legacy, _loadedPath, false);
+                        if (File.Exists(legacy + ".bak")) File.Copy(legacy + ".bak", _loadedPath + ".bak", false);
+                    }
+                }
+                catch (Exception error) { Mod.LogError("迁移当前玩家的旧箱子标记失败", error); }
+            }
+            LoadMarkedChests();
+            _markedChests.UnionWith(marks);
+            SaveMarkedChests();
+            RemoteStorageSnapshots.Initialize();
+            RefreshItems();
+        }
+
+        internal static void CloseAfterRemoteOpen()
+        {
+            IsOpen = false; _isDragging = false; _search.Unfocus();
+            UIRenderer.UnregisterPanelBounds(PanelId);
+        }
+
+        internal static void RestoreRejectedMark(long key, bool marked)
+        {
+            if (marked) _markedChests.Add(key); else _markedChests.Remove(key);
+            SaveMarkedChests();
+        }
+
         public static IEnumerable<Chest> GetMarkedReadableChests()
         {
             EnsureLoadedForCurrentWorld();
@@ -170,6 +222,7 @@ namespace QualityOfTerraria.UI
 
         public static void EnsureLoadedForCurrentWorld()
         {
+            if (Main.netMode == 1) return; // 联机世界身份和个人标记由服务器握手确认。
             if (Main.ActiveWorldFileData == null || Main.ActiveWorldFileData.UniqueId == Guid.Empty) return;
             string curWorld = Main.ActiveWorldFileData.UniqueId.ToString("N");
             if (_loadedWorldName != curWorld)
@@ -240,7 +293,7 @@ namespace QualityOfTerraria.UI
             _markedChests.Clear();
             if (_loadedPath == null) return;
             string legacy = Path.Combine(Path.GetDirectoryName(_loadedPath), Main.worldName + ".markedchests.dat");
-            string source = File.Exists(_loadedPath) || File.Exists(_loadedPath + ".bak") ? _loadedPath : legacy;
+            string source = Main.netMode == 1 || File.Exists(_loadedPath) || File.Exists(_loadedPath + ".bak") ? _loadedPath : legacy;
             _canSave = !File.Exists(source) && !File.Exists(source + ".bak");
             HashSet<long> loaded;
             if (StoragePersistence.Read(source, reader =>
@@ -874,7 +927,7 @@ namespace QualityOfTerraria.UI
 
                 // 箱子名称与编号
                 string chestTitle = !string.IsNullOrEmpty(chest.name) ? chest.name : $"储物箱 #{cIndex + 1}";
-                PanelLayout.DrawFittedText(chestTitle, startX + 12, itemY + 4, itemW - 142,
+                PanelLayout.DrawFittedText(chestTitle, startX + 12, itemY + 4, itemW - 208,
                     (byte)(isMarked ? 255 : 200), (byte)(isMarked ? 255 : 200), (byte)(isMarked ? 180 : 200));
 
                 // 箱子坐标与物品数
@@ -884,13 +937,15 @@ namespace QualityOfTerraria.UI
                     if (chest.item[s] != null && !chest.item[s].IsAir) inChestCount++;
                 }
                 string detail = GetChestForRead(cIndex) == null ? $"坐标: ({chest.x}, {chest.y}) | 内容尚未确认" : $"坐标: ({chest.x}, {chest.y}) | {inChestCount}/40 格";
-                PanelLayout.DrawFittedText(detail, startX + 12, itemY + 22, itemW - 142, 160, 180, 200);
+                PanelLayout.DrawFittedText(detail, startX + 12, itemY + 22, itemW - 208, 160, 180, 200);
 
                 // 标记开关按钮
                 int tBtnX = startX + itemW - 130;
                 int tBtnY = itemY + 6;
                 int tBtnW = 110;
                 int tBtnH = 28;
+                if (DrawButton("打开", tBtnX - 66, tBtnY, 60, tBtnH, false, isMarked))
+                    RemoteStorageOperations.RequestOpenChest(cIndex);
 
                 bool tHover = mouseX >= tBtnX && mouseX <= tBtnX + tBtnW && mouseY >= tBtnY && mouseY <= tBtnY + tBtnH;
                 byte tr = isMarked ? (byte)(tHover ? 35 : 20) : (byte)(tHover ? 50 : 30);
@@ -985,6 +1040,12 @@ namespace QualityOfTerraria.UI
             Player player = Main.LocalPlayer;
             if (player == null || slotRef.Item == null || slotRef.Item.IsAir)
                 return;
+
+            if (Main.netMode == 1)
+            {
+                RemoteStorageOperations.RequestTake(slotRef.ChestIndex, slotRef.SlotIndex, slotRef.Item, takeAll);
+                return;
+            }
 
             if (!CanMutateChest(slotRef.ChestIndex))
             {
@@ -1099,6 +1160,12 @@ namespace QualityOfTerraria.UI
             if (player == null || Main.chest == null)
                 return;
 
+            if (Main.netMode == 1)
+            {
+                RemoteStorageOperations.RequestToolbar(actionIndex);
+                return;
+            }
+
             switch (actionIndex)
             {
                 case 0: // 全部存入
@@ -1164,6 +1231,14 @@ namespace QualityOfTerraria.UI
         {
             if (item == null || item.IsAir || item.stack <= 0)
                 return false;
+
+            if (Main.netMode == 1)
+            {
+                // 新渔获尚不属于服务器背包库存，交回调用者按原版拾取，不发送客户端创造物品的请求。
+                if (nearbyPlayer != null && Array.IndexOf(Main.LocalPlayer.inventory, item) < 0 && !ReferenceEquals(item, Main.mouseItem)) return false;
+                RemoteStorageOperations.RequestDeposit(item);
+                return false; // 应答前保持原物品，不能提前扣除或把请求当作成功。
+            }
 
             int originalStack = item.stack;
 
@@ -1312,8 +1387,8 @@ namespace QualityOfTerraria.UI
                 "无限药水：" + (config?.InfinitePotions == true ? "开启" : "关闭") + "，每组至少 " + (config?.PotionStackRequirement ?? 30) + " 瓶",
                 "便携制作站：" + (config?.PortableCraftingStations == true ? "开启" : "关闭"),
                 "增益站与怪物旗帜：" + (config?.InfiniteStationsAndBanners == true ? "开启" : "关闭"),
-                Main.netMode == 1 ? "联机：远程快照可查看/合成；存取需先打开箱子" : "单人：已标记且未锁/未占用的箱子参与存取与合成",
-                !_canSave ? "标记存档无法恢复：本会话标记不会保存，请查看日志" : Main.netMode == 1 ? RemoteStorageSnapshots.Status : "物品来源：个人存储、大背包和已标记箱子"
+                Main.netMode == 1 ? "联机：全世界标记箱子可远程存取；由服务器确认" : "单人：已标记且未锁/未占用的箱子参与存取与合成",
+                !_canSave ? "标记存档无法恢复：本会话标记不会保存，请查看日志" : Main.netMode == 1 ? RemoteStorageOperations.Status : "物品来源：个人存储、大背包和已标记箱子"
             };
             int lineHeight = Math.Min(30, (_footerY - _contentY) / lines.Length);
             for (int i = 0; i < lines.Length; i++)

@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using QualityOfTerraria.UI;
+using QualityOfTerraria.Networking;
 
 namespace QualityOfTerraria.Patches
 {
@@ -13,7 +14,7 @@ namespace QualityOfTerraria.Patches
     {
         public static void Postfix(Player __instance)
         {
-            if (Mod.Config == null || !Mod.Config.PortableCraftingStations || __instance == null)
+            if (__instance == null || SettingsSync.GetPlayerConfig(__instance.whoAmI)?.PortableCraftingStations != true)
                 return;
 
             foreach (var item in InfiniteBuffsPatches.GetAllPlayerItems(__instance))

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Terraria;
@@ -38,89 +38,80 @@ namespace QualityOfTerraria.Features
         {
             if (!Mod.WorldActive || Main.gameMenu) return;
             Player player = Main.LocalPlayer;
-            if (player == null || !player.active)
+            if (player == null || !player.active || player.dead) return;
+            if (Main.netMode == 1)
+            {
+                Networking.FeatureNetwork.RequestDummy(Main.MouseWorld);
                 return;
-
-            Vector2 mouseWorld = Main.MouseWorld;
-
-            // 1. 检查是否存在鼠标附近的假人，若有则移除
-            bool removedAny = false;
+            }
+            if (Main.netMode == 2) return;
+            // 单机保留原来的附近假人移除和旧无绑定假人清理行为。
+            bool removed = false;
             for (int i = 0; i < Main.maxNPCs; i++)
             {
                 NPC npc = Main.npc[i];
-                if (npc != null && npc.active && npc.type == NPCID.TargetDummy)
-                {
-                    // 若鼠标就在假人附近 80 像素内，或者由快捷键生成的假人
-                    if (Vector2.Distance(npc.Center, mouseWorld) < 80f || (ActiveDummyWhoAmI == i && npc.ai[0] == -1f))
-                    {
-                        npc.active = false;
-                        npc.netUpdate = true;
-                        if (Main.netMode == 1)
-                        {
-                            NetMessage.SendData(MessageID.SyncNPC, -1, -1, null, i);
-                        }
-                        removedAny = true;
-                    }
-                }
-            }
-
-            if (removedAny)
-            {
-                ActiveDummyWhoAmI = -1;
-                IsTrackingDummy = false;
-                Reset();
-                SoundEngine.PlaySound(SoundID.Item14);
-                Main.NewText("【测试假人】已移除测试假人！", 255, 180, 100);
-                return;
-            }
-
-            // 2. 清理全局所有旧的无物理 Tile 绑定假人，确保全世界永远最多只有 1 个测试人偶，根除多假人重叠导致的伤害成倍暴增
-            for (int i = 0; i < Main.maxNPCs; i++)
-            {
-                NPC npc = Main.npc[i];
-                if (npc != null && npc.active && npc.type == NPCID.TargetDummy && npc.ai[0] == -1f)
+                if (npc == null || !npc.active || npc.type != NPCID.TargetDummy) continue;
+                if (Vector2.Distance(npc.Center, Main.MouseWorld) < 80f || (i == ActiveDummyWhoAmI && npc.ai[0] == -1f))
                 {
                     npc.active = false;
-                    npc.netUpdate = true;
-                    if (Main.netMode == 1)
-                    {
-                        NetMessage.SendData(MessageID.SyncNPC, -1, -1, null, i);
-                    }
+                    removed = true;
                 }
             }
-
-            // 3. 在鼠标位置召唤唯一的测试假人
-            int spawned = NPC.NewNPC(null, (int)mouseWorld.X, (int)mouseWorld.Y, NPCID.TargetDummy);
-            if (spawned >= 0 && spawned < Main.maxNPCs)
+            if (removed) { BindDummy(-1); return; }
+            for (int i = 0; i < Main.maxNPCs; i++)
             {
-                NPC dummy = Main.npc[spawned];
-                dummy.Center = mouseWorld;
-                dummy.homeless = true;
-                dummy.netUpdate = true;
-                dummy.ai[0] = -1f;
-                dummy.ai[1] = -1f;
-                dummy.immortal = true;
-                dummy.dontTakeDamage = false;
-                dummy.life = 1000;
-                dummy.lifeMax = 1000;
-                dummy.defense = 0;
-                dummy.defDefense = 0;
-                dummy.knockBackResist = 0f;
-                dummy.velocity = Vector2.Zero;
-                dummy.timeLeft = 7200;
-
-                ActiveDummyWhoAmI = spawned;
-                IsTrackingDummy = true;
-                Reset();
-
-                if (Main.netMode == 1)
-                {
-                    NetMessage.SendData(MessageID.SyncNPC, -1, -1, null, spawned);
-                }
-
-                SoundEngine.PlaySound(SoundID.Dig);
-                Main.NewText("【测试假人】已在鼠标位置放置测试假人！可直接攻击进行打靶测伤。(再次对准假人按键可移除，右键面板可重置)", 100, 240, 255);
+                NPC npc = Main.npc[i];
+                if (npc != null && npc.active && npc.type == NPCID.TargetDummy && npc.ai[0] == -1f) RemoveDummy(npc);
             }
+            NPC existing = ActiveDummyWhoAmI >= 0 && ActiveDummyWhoAmI < Main.maxNPCs ? Main.npc[ActiveDummyWhoAmI] : null;
+            BindDummy(ToggleForPlayer(player, Main.MouseWorld, existing));
+        }
+
+        // 只能由单机或服务器调用；服务器以当前玩家会话持有的NPC对象核验所有权。
+        internal static int ToggleForPlayer(Player player, Vector2 position, NPC existing)
+        {
+            if (Main.netMode == 1) return -1;
+            if (existing != null && existing.active && existing.type == NPCID.TargetDummy && existing.ai[0] == -1f)
+            {
+                RemoveDummy(existing);
+                return -1;
+            }
+            int index = NPC.NewNPC(null, (int)position.X, (int)position.Y, NPCID.TargetDummy);
+            if (index < 0 || index >= Main.maxNPCs) return -1;
+            NPC dummy = Main.npc[index];
+            dummy.Center = position;
+            dummy.homeless = true;
+            dummy.ai[0] = -1f;
+            dummy.ai[1] = -1f;
+            dummy.immortal = true;
+            dummy.dontTakeDamage = false;
+            dummy.life = dummy.lifeMax = 1000;
+            dummy.defense = dummy.defDefense = 0;
+            dummy.knockBackResist = 0f;
+            dummy.velocity = Vector2.Zero;
+            dummy.timeLeft = 7200;
+            dummy.netUpdate = true;
+            if (Main.netMode == 2) NetMessage.SendData(MessageID.SyncNPC, -1, -1, null, index);
+            return index;
+        }
+
+        internal static void RemoveDummy(NPC dummy)
+        {
+            if (Main.netMode == 1 || dummy == null || !dummy.active || dummy.type != NPCID.TargetDummy || dummy.ai[0] != -1f ||
+                dummy.whoAmI < 0 || dummy.whoAmI >= Main.maxNPCs || !ReferenceEquals(Main.npc[dummy.whoAmI], dummy)) return;
+            dummy.active = false;
+            dummy.netUpdate = true;
+            if (Main.netMode == 2) NetMessage.SendData(MessageID.SyncNPC, -1, -1, null, dummy.whoAmI);
+        }
+
+        internal static void BindDummy(int index)
+        {
+            ActiveDummyWhoAmI = index;
+            IsTrackingDummy = index >= 0;
+            Reset();
+            if (index >= 0) SoundEngine.PlaySound(SoundID.Dig);
+            else SoundEngine.PlaySound(SoundID.Item14);
+            Main.NewText(index >= 0 ? "【测试假人】已放置自己的测试假人！再次按键移除，右键面板重置。" : "【测试假人】已移除自己的测试假人。", 100, 240, 255);
         }
 
         public static void RecordDamage(int dummyIndex, int damage)
@@ -133,7 +124,8 @@ namespace QualityOfTerraria.Features
 
         public static void RecordDamage(int dummyIndex, int damage, long hitSource)
         {
-            if (!Mod.WorldActive || Main.gameMenu || damage <= 0) return;
+            if (!Mod.WorldActive || Main.gameMenu || Main.netMode == 2 || damage <= 0) return;
+            if (Main.netMode == 1 && ActiveDummyWhoAmI < 0) return;
 
             // 若当前已绑定唯一种植的假人，严格只统计该假人
             if (ActiveDummyWhoAmI >= 0 && dummyIndex != ActiveDummyWhoAmI)

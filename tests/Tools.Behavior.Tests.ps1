@@ -37,6 +37,9 @@ $extraTools = ''; $extraDummy = ''; $recall = ''; $hits = ''
 if (!$Baseline) {
     $extraTools = (Method $tools 'private static int TransferLiquid(') + (Method $tools 'private static void StoreLiquid(')
     $extraTools += Method $tools 'public static void ResetSession()'
+    foreach ($signature in @('internal static int ApplyDragPlacement(', 'internal static int ApplyWallWand(', 'internal static int FindWallSlot(', 'internal static void ApplyLiquid(', 'internal static void SyncTileArea(')) {
+        $extraTools += (Method $tools $signature).Replace('internal static', 'public static')
+    }
     $extraDummy = (Method $dummy 'public static void RecordDamage(int dummyIndex, int damage, long hitSource)') + (Method $dummy 'public static void ResetSession()')
     $recallClass = Method $qol 'public static class InstantRecallPatch'
     $recall = $recallClass + (Method $qol 'public static class ToolStatsPatch') + (Method $qol 'public static class ToolAnimationPatch')
@@ -59,7 +62,7 @@ public class Item {
  public void TurnToAir() { stack = 0; createTile=-1; createWall=0; }
 }
 public class Player {
- public bool active = true, dead, mouseInterface, controlUseItem; public int whoAmI, chest = -1, itemTime, itemTimeMax, itemAnimation = 90, itemAnimationMax=90;
+ public bool active = true, dead, mouseInterface, controlUseItem; public int selectedItem, whoAmI, chest = -1, itemTime, itemTimeMax, itemAnimation = 90, itemAnimationMax=90;
  public float pickSpeed=1, tileSpeed=1, wallSpeed=1;
  public Item HeldItem = new Item(); public static int tileRangeX = 5, tileRangeY = 4;
  public Item[] inventory=new Item[60]; public Vec Center=new Vec(320,320);
@@ -83,7 +86,7 @@ public static class WorldGen {
  public static void PlaceWall(int x,int y,int type,bool mute) { Main.tile[x,y].wall=(ushort)type; }
  public static void SquareTileFrame(int x,int y,bool reset) {}
 }
-public static class NetMessage { public static void SendTileSquare(int a,int b,int c,int d) {} public static void sendWater(int x,int y) {} }
+public static class NetMessage { public static void SendTileSquare(int a,int b,int c,int d,int e=0) {} public static void sendWater(int x,int y) {} }
 public static class Liquid { public static void AddWater(int x,int y) {} }
 public static class SoundID { public static int Dig,MenuClose; }
 public static class SoundEngine { public static void PlaySound(int sound) {} }
@@ -105,6 +108,9 @@ public static class UIRenderer {
  public static bool IsMouseOverAnyPanelUpdatePhase() { return HoverPanel || Hit((int)(Mouse.X/Main.UIScale),(int)(Mouse.Y/Main.UIScale)); }
 }
 public class Config { public bool WandMaterialNoConsume, MaxStack9999=true, InstantRecall=true, FastToolSpeed, ExtraTileReach, NoDamageVariance, TownNPCImmortal; }
+public static class SettingsSync { public static Config[] Profiles={new Config(),new Config {WandMaterialNoConsume=true}}; public static Config GetPlayerConfig(int player) {return Main.netMode==2?Profiles[player]:Mod.Config;} }
+public static class ToolNetwork { public static bool Busy; public static int Requests; public static void Request(string action,int slot=-1,params int[] values) {Requests++;} }
+public static class RemoteStorageOperations { public static bool Busy; }
 public static class Mod { public static Config Config = new Config(); public static bool WorldActive=true; }
 public static class PlayerSpawnContext { public static int RecallFromItem; }
 public static class ItemID { public const int MagicMirror=50, IceMirror=3199, CellPhone=3124, RecallPotion=2350, PotionOfReturn=4870, Shellphone=5358, ShellphoneDummy=5357, ShellphoneHell=5361, ShellphoneOcean=5360, ShellphoneSpawn=5359, MagicConch=4263, DemonConch=4819; }
@@ -182,12 +188,31 @@ if ($Baseline) {
    }
    Mod.Config.InstantRecall=false; Main.LocalPlayer.itemTime=90; QoL.InstantRecallPatch.Postfix(Main.LocalPlayer,Main.LocalPlayer.HeldItem); Check(Main.LocalPlayer.itemTime==90,"瞬传关闭不修改原版计时");
    foreach(bool speed in new bool[] {false,true}) foreach(bool reach in new bool[] {false,true}) {
-    Mod.Config.FastToolSpeed=speed; Mod.Config.ExtraTileReach=reach; Main.LocalPlayer.pickSpeed=0.8f; Main.LocalPlayer.tileSpeed=1.5f; Main.LocalPlayer.wallSpeed=1; Player.tileRangeX=5; Player.tileRangeY=4;
+    Mod.Config.FastToolSpeed=speed; Mod.Config.ExtraTileReach=reach?5:0; Main.LocalPlayer.pickSpeed=0.8f; Main.LocalPlayer.tileSpeed=1.5f; Main.LocalPlayer.wallSpeed=1; Player.tileRangeX=5; Player.tileRangeY=4;
     QoL.ToolStatsPatch.Postfix(Main.LocalPlayer); Check(Player.tileRangeX==(reach?10:5) && Player.tileRangeY==(reach?9:4),"距离与速度独立 "+speed+"/"+reach);
     Check(Main.LocalPlayer.pickSpeed==(speed?0.4f:0.8f) && Main.LocalPlayer.tileSpeed==(speed?3:1.5f) && Main.LocalPlayer.wallSpeed==(speed?2:1),"工具与放置速度 "+speed+"/"+reach);
    }
    Main.LocalPlayer.HeldItem.axe=10; Main.LocalPlayer.itemTime=20; Main.LocalPlayer.itemAnimation=40; Main.LocalPlayer.itemAnimationMax=40; QoL.InstantRecallPatch.Postfix(Main.LocalPlayer,Main.LocalPlayer.HeldItem); QoL.ToolAnimationPatch.Postfix(Main.LocalPlayer,Main.LocalPlayer.HeldItem);
    Check(Main.LocalPlayer.itemTime==10 && Main.LocalPlayer.itemAnimation==20,"斧锤使用与动画加速");
+   Main.netMode=2;
+   foreach(bool serverDefault in new bool[] {false,true}) { Mod.Config.WandMaterialNoConsume=serverDefault;
+   foreach(int id in new int[] {0,1}) {
+    ClearTiles(); Player actor=new Player {whoAmI=id,HeldItem=new Item {stack=2,createTile=1}};
+    Tools.ApplyDragPlacement(actor,20,20,20,20); Check(actor.HeldItem.stack==(id==0?1:2),"服务器快速放置按个人无耗设置隔离 "+id);
+    ClearTiles(); actor.inventory[0]=new Item {stack=2,createWall=1}; Main.tile[20,20]=new Tile();
+    Tools.ApplyWallWand(actor); Check(actor.inventory[0].stack==(id==0?1:2),"服务器铺墙按个人无耗设置隔离 "+id);
+   }
+   }
+   SettingsSync.Profiles[0]=null; ClearTiles(); Player unconfirmed=new Player {whoAmI=0,HeldItem=new Item {stack=2,createTile=1}};
+   Check(Tools.ApplyDragPlacement(unconfirmed,20,20,20,20)==0 && unconfirmed.HeldItem.stack==2,"个人配置未确认不允许服务器快速放置");
+   SettingsSync.Profiles[0]=new Config(); Main.netMode=0;
+   ClearTiles(); Mod.Config.WandMaterialNoConsume=false; Main.LocalPlayer.inventory[0]=new Item {stack=1,createWall=1}; Main.tile[19,20]=new Tile(); Main.tile[20,20]=new Tile(); Main.tile[21,20]=new Tile(); Tools.ExecuteWallWand();
+   int wallCount=0; foreach(Tile t in Main.tile) if(t!=null && t.wall>0) wallCount++;
+   Check(wallCount==1 && Main.LocalPlayer.inventory[0].stack==0,"铺墙材料耗尽立即停止，不能继续免费铺设");
+   ClearTiles(); Main.netMode=1; Main.LocalPlayer.HeldItem=new Item {stack=2,createTile=1}; Main.LocalPlayer.inventory[0]=new Item {stack=2,createWall=1}; Main.tile[20,20]=new Tile {liquid=17};
+   Tools.ExecuteDragPlacement(Main.LocalPlayer,20,20,20,20); Tools.ExecuteWallWand(); Tools.CurrentLiquidMode=Tools.LiquidWandMode.Water; Keyboard.Pressed=Keys.OemSemicolon; Main.FollowMouse=false; Tools.UpdateLiquidWand();
+   Check(!Main.tile[20,20].IsActive && Main.tile[20,20].wall==0 && Main.tile[20,20].liquid==17 && Tools.StoredWater==0 && ToolNetwork.Requests==3,"联机客户端放置铺墙吸液只发请求不改世界");
+   Main.netMode=0;
    Tools.StoredWater=17; Tools.StoredLava=3; Tools._isDragging=Tools._isDraggingQuickPlaceHud=Tools._isDraggingLiquidHud=Tools._hasHoverTile=true; Tools.ResetSession();
    Check(!Tools.QuickPlaceActive && Tools.CurrentLiquidMode==Tools.LiquidWandMode.Off && !Tools._isDragging && !Tools._isDraggingQuickPlaceHud && !Tools._isDraggingLiquidHud && !Tools._hasHoverTile,"世界退出关闭工具与预览拖动");
    Check(Tools.StoredWater==17 && Tools.StoredLava==3,"退出世界保留已吸液体进程库存");
@@ -216,6 +241,7 @@ if ($Baseline) {
    }
 '@)
 }
+if (!$Baseline) { $harness=$harness.Replace('FastToolSpeed, ExtraTileReach, NoDamageVariance', 'FastToolSpeed, NoDamageVariance').Replace('TownNPCImmortal; }', 'TownNPCImmortal; public int ExtraTileReach=5; }') }
 # 旧版 Windows PowerShell 的编译器不支持插值字符串；仅消息文案降级，不改执行算法。
 $harness = $harness.Replace('$"', '"')
 Add-Type -TypeDefinition $harness -Language CSharp

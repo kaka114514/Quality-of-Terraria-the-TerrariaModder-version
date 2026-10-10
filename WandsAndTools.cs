@@ -1,9 +1,10 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Input;
 using QualityOfTerraria.Features;
 using QualityOfTerraria.UI;
+using QualityOfTerraria.Networking;
 using Terraria;
 using Terraria.Audio;
 using Terraria.DataStructures;
@@ -131,11 +132,27 @@ namespace QualityOfTerraria
 
         private static void ExecuteDragPlacement(Player player, int x1, int y1, int x2, int y2)
         {
+            if (Main.netMode == 1)
+            {
+                ToolNetwork.Request("place", player.selectedItem, x1, y1, x2, y2);
+                return;
+            }
+            ApplyDragPlacement(player, x1, y1, x2, y2);
+        }
+
+        internal static int ApplyDragPlacement(Player player, int x1, int y1, int x2, int y2)
+        {
+            var config = SettingsSync.GetPlayerConfig(player.whoAmI);
+            if (Main.netMode == 2 && config == null)
+            {
+                Main.NewText("正在等待个人设置交换确认，请稍后使用建造工具", 255, 180, 100);
+                return 0;
+            }
             Item held = player.HeldItem;
             if (held == null || held.IsAir)
             {
                 Main.NewText("快速放置：手中没有物品！请手持方块、平台或墙壁。", 255, 120, 120);
-                return;
+                return 0;
             }
 
             bool isTile = held.createTile >= 0;
@@ -144,7 +161,7 @@ namespace QualityOfTerraria
             if (!isTile && !isWall)
             {
                 Main.NewText($"快速放置：当前手持物品 [{held.Name}] 不是可放置的方块、平台或背景墙！", 255, 120, 120);
-                return;
+                return 0;
             }
 
             int minX = Math.Max(10, Math.Min(x1, x2));
@@ -153,7 +170,7 @@ namespace QualityOfTerraria
             int maxY = Math.Min(Main.maxTilesY - 10, Math.Max(y1, y2));
 
             int placed = 0;
-            bool noConsume = Mod.Config != null && Mod.Config.WandMaterialNoConsume;
+            bool noConsume = config != null && config.WandMaterialNoConsume;
 
             for (int x = minX; x <= maxX; x++)
             {
@@ -217,21 +234,9 @@ namespace QualityOfTerraria
             if (placed > 0)
             {
                 SoundEngine.PlaySound(SoundID.Dig);
-                if (Main.netMode == 1)
-                {
-                    // 联机模式下分块同步 Tile，避免超大单包造成网络丢包或断连
-                    int chunkSize = 20;
-                    for (int cx = minX; cx <= maxX; cx += chunkSize)
-                    {
-                        for (int cy = minY; cy <= maxY; cy += chunkSize)
-                        {
-                            int cw = Math.Min(chunkSize, maxX - cx + 1);
-                            int ch = Math.Min(chunkSize, maxY - cy + 1);
-                            NetMessage.SendTileSquare(-1, cx, cy, Math.Max(cw, ch));
-                        }
-                    }
-                }
+                if (Main.netMode == 2) SyncTileArea(minX, minY, maxX, maxY);
             }
+            return placed;
         }
 
         // 精确将瓦片世界坐标投影为 UI 屏幕坐标 (融合 ZoomMatrix 视距缩放与 UIScale 界面比例)
@@ -265,7 +270,7 @@ namespace QualityOfTerraria
         }
 
         public static LiquidWandMode CurrentLiquidMode = LiquidWandMode.Off;
-        // 储量使用原版液体单位（255 单位 = 1 格），保留至本次游戏进程结束。
+        // 储量使用原版液体单位（255 单位 = 1 格）；单机在游戏进程保留，联机由服务器保存本世界会话库存。
         public static int StoredWater = 0;
         public static int StoredLava = 0;
         public static int StoredShimmer = 0;
@@ -321,8 +326,21 @@ namespace QualityOfTerraria
             if (mX < 10 || mX >= Main.maxTilesX - 10 || mY < 10 || mY >= Main.maxTilesY - 10)
                 return;
 
+            bool absorb = keyState.IsKeyDown(Keys.OemSemicolon);
+            bool release = keyState.IsKeyDown(Keys.OemQuotes);
+            if (!absorb && !release) return;
+            if (Main.netMode == 1)
+            {
+                ToolNetwork.Request("liquid", -1, mX, mY, (int)CurrentLiquidMode, absorb ? 1 : 0, release ? 1 : 0);
+                return;
+            }
+            ApplyLiquid(mX, mY, CurrentLiquidMode, absorb, release);
+        }
+
+        internal static void ApplyLiquid(int mX, int mY, LiquidWandMode mode, bool absorb, bool release)
+        {
             // 1. 按住 ; 键 (OemSemicolon)：吸收鼠标指针周围液体
-            if (keyState.IsKeyDown(Keys.OemSemicolon))
+            if (absorb)
             {
                 for (int dx = -2; dx <= 2; dx++)
                 {
@@ -341,7 +359,7 @@ namespace QualityOfTerraria
 
                             tile.liquid = 0;
                             WorldGen.SquareTileFrame(x, y, true);
-                            if (Main.netMode == 1)
+                            if (Main.netMode == 2)
                             {
                                 NetMessage.sendWater(x, y);
                             }
@@ -351,7 +369,7 @@ namespace QualityOfTerraria
             }
 
             // 2. 按住 ' 键 (OemQuotes)：在鼠标所在格生成流体
-            if (keyState.IsKeyDown(Keys.OemQuotes))
+            if (release)
             {
                 Tile tile = Main.tile[mX, mY];
                 if (tile != null && (!tile.active() || !Main.tileSolid[tile.type]))
@@ -359,7 +377,7 @@ namespace QualityOfTerraria
                     int targetLiquidType = 0;
                     int amount = 0;
 
-                    switch (CurrentLiquidMode)
+                    switch (mode)
                     {
                         case LiquidWandMode.Water:
                             targetLiquidType = 0;
@@ -385,7 +403,7 @@ namespace QualityOfTerraria
                         tile.liquidType(targetLiquidType);
                         Liquid.AddWater(mX, mY);
                         WorldGen.SquareTileFrame(mX, mY, true);
-                        if (Main.netMode == 1)
+                        if (Main.netMode == 2)
                         {
                             NetMessage.sendWater(mX, mY);
                         }
@@ -426,6 +444,14 @@ namespace QualityOfTerraria
         public static void ExecuteNPCHome()
         {
             if (!Mod.WorldActive || Main.gameMenu) return;
+            if (Main.netMode == 1) { ToolNetwork.Request("home"); return; }
+            int count = ApplyNPCHome();
+            SoundEngine.PlaySound(SoundID.MenuOpen);
+            Main.NewText($"城镇管理：已将 {count} 位城镇NPC召回房间！", 150, 255, 150);
+        }
+
+        internal static int ApplyNPCHome()
+        {
             int count = 0;
             for (int i = 0; i < Main.maxNPCs; i++)
             {
@@ -435,7 +461,7 @@ namespace QualityOfTerraria
                     npc.position.X = npc.homeTileX * 16;
                     npc.position.Y = (npc.homeTileY - 1) * 16;
                     npc.netUpdate = true;
-                    if (Main.netMode == 1)
+                    if (Main.netMode == 2)
                     {
                         NetMessage.SendData(MessageID.SyncNPC, -1, -1, null, i);
                     }
@@ -443,8 +469,7 @@ namespace QualityOfTerraria
                 }
             }
 
-            SoundEngine.PlaySound(SoundID.MenuOpen);
-            Main.NewText($"城镇管理：已将 {count} 位城镇NPC召回房间！", 150, 255, 150);
+            return count;
         }
 
         // ================= 4. 快捷护士瞬间治疗 (H 键，收费与判空) =================
@@ -455,29 +480,20 @@ namespace QualityOfTerraria
             if (player == null || !player.active || player.dead)
                 return;
 
-            long missingLife = player.statLifeMax2 - player.statLife;
-            int debuffCount = 0;
-            for (int i = 0; i < player.buffType.Length; i++)
+            if (RemoteStorageOperations.Busy || ToolNetwork.Busy)
             {
-                int b = player.buffType[i];
-                if (b > 0 && Main.debuff[b] && !Main.buffNoTimeDisplay[b])
-                {
-                    debuffCount++;
-                }
-            }
-
-            if (missingLife <= 0 && debuffCount == 0)
-            {
-                Main.NewText("生命值已满且无负面状态，无需治疗！", 120, 255, 120);
+                Main.NewText("正在等待服务器物品操作确认，请稍后治疗", 255, 180, 100);
                 return;
             }
-
-            // 护士收费计算：基础每点损失生命值 0.75 铜币，每个 Debuff 10 银币 (1000 铜币)
-            long cost = (long)(missingLife * 0.75f) + debuffCount * 1000;
-            if (cost < 1) cost = 1;
+            int missingLife = Math.Max(0, player.statLifeMax2 - player.statLife);
+            if (!NurseTreatment.NeedsTreatment(player))
+            {
+                Main.NewText(NurseTreatment.NoTreatment, 120, 255, 120);
+                return;
+            }
+            long cost = NurseTreatment.Cost();
             string costStr = FormatCoins(cost);
-
-            if (!player.BuyItem(cost))
+            if (cost > 0 && !player.BuyItem(cost))
             {
                 Main.NewText($"钱币不足！护士治疗需要 {costStr}，护士拒绝治疗！", 255, 100, 100);
                 return;
@@ -487,15 +503,7 @@ namespace QualityOfTerraria
             player.statLife = player.statLifeMax2;
             player.statMana = player.statManaMax2;
 
-            for (int i = 0; i < player.buffType.Length; i++)
-            {
-                int b = player.buffType[i];
-                if (b > 0 && Main.debuff[b] && !Main.buffNoTimeDisplay[b])
-                {
-                    player.DelBuff(i);
-                    i--;
-                }
-            }
+            NurseTreatment.ClearDebuffs(player);
 
             player.HealEffect(healed);
             SoundEngine.PlaySound(SoundID.Item4);
@@ -552,27 +560,39 @@ namespace QualityOfTerraria
             if (player == null || !player.active || player.dead)
                 return;
 
-            Item wallMaterial = null;
-            for (int i = 0; i < 50; i++)
+            int slot = FindWallSlot(player);
+            if (Main.netMode == 1) { ToolNetwork.Request("wall", slot); return; }
+            ApplyWallWand(player);
+        }
+
+        internal static int FindWallSlot(Player player)
+        {
+            for (int slot = 0; slot < 50; slot++)
+                if (player.inventory[slot] != null && !player.inventory[slot].IsAir && player.inventory[slot].createWall > 0) return slot;
+            return -1;
+        }
+
+        internal static int ApplyWallWand(Player player)
+        {
+            var config = SettingsSync.GetPlayerConfig(player.whoAmI);
+            if (Main.netMode == 2 && config == null)
             {
-                Item it = player.inventory[i];
-                if (it != null && !it.IsAir && it.createWall > 0)
-                {
-                    wallMaterial = it;
-                    break;
-                }
+                Main.NewText("正在等待个人设置交换确认，请稍后使用建造工具", 255, 180, 100);
+                return 0;
             }
+            int slot = FindWallSlot(player);
+            Item wallMaterial = slot < 0 ? null : player.inventory[slot];
 
             if (wallMaterial == null)
             {
                 Main.NewText("快速铺墙：背包中没有背景墙！", 255, 100, 100);
-                return;
+                return 0;
             }
 
             int pX = (int)(player.Center.X / 16f);
             int pY = (int)(player.Center.Y / 16f);
             int placed = 0;
-            bool noConsume = Mod.Config != null && Mod.Config.WandMaterialNoConsume;
+            bool noConsume = config != null && config.WandMaterialNoConsume;
 
             for (int dx = -10; dx <= 10; dx++)
             {
@@ -595,25 +615,29 @@ namespace QualityOfTerraria
                             {
                                 wallMaterial.stack--;
                                 if (wallMaterial.stack <= 0)
-                                    wallMaterial.TurnToAir();
-                            }
-
-                            if (Main.netMode == 1)
-                            {
-                                NetMessage.SendTileSquare(-1, x, y, 1);
+                                { wallMaterial.TurnToAir(); goto WallDone; }
                             }
                         }
                     }
                 }
             }
 
+        WallDone:
+            if (Main.netMode == 2) SyncTileArea(pX - 10, pY - 10, pX + 10, pY + 10);
             SoundEngine.PlaySound(SoundID.Dig);
+            return placed;
         }
 
         // ================= 7. 气象控制 (U 键) =================
         public static void ExecuteWeatherController()
         {
             if (!Mod.WorldActive || Main.gameMenu) return;
+            if (Main.netMode == 1) { ToolNetwork.Request("weather"); return; }
+            ApplyWeather();
+        }
+
+        internal static void ApplyWeather()
+        {
             if (!Main.raining)
             {
                 Main.StartRain();
@@ -628,13 +652,22 @@ namespace QualityOfTerraria
                 Main.NewText("气象控制：天气转晴！", 255, 230, 100);
             }
 
-            if (Main.netMode == 1)
+            if (Main.netMode == 2)
             {
                 NetMessage.SendData(MessageID.WorldData);
             }
         }
 
 
+
+        internal static void SyncTileArea(int minX, int minY, int maxX, int maxY)
+        {
+            minX = Math.Max(10, minX); minY = Math.Max(10, minY);
+            maxX = Math.Min(Main.maxTilesX - 11, maxX); maxY = Math.Min(Main.maxTilesY - 11, maxY);
+            for (int x = minX; x <= maxX; x += 20)
+                for (int y = minY; y <= maxY; y += 20)
+                    NetMessage.SendTileSquare(-1, x, y, Math.Min(20, maxX - x + 1), Math.Min(20, maxY - y + 1));
+        }
 
         // HUD 坐标与可拖拽支持
         public static int QuickPlaceHudX = 20;
@@ -790,7 +823,7 @@ namespace QualityOfTerraria
 
                 UIRenderer.DrawPanel(LiquidHudX, LiquidHudY, LiquidHudW, LiquidHudH, 25, 25, 35, 220);
                 UIRenderer.DrawRectOutline(LiquidHudX, LiquidHudY, LiquidHudW, LiquidHudH, r, g, b, 255, 1);
-                PanelLayout.DrawFittedText($"[液体魔杖: {modeName}] 已存: {count / 255.0:0.##} 格（本次游戏） | [;] 吸收 | ['] 放置", LiquidHudX + 10, LiquidHudY + 8, LiquidHudW - 20, r, g, b);
+                PanelLayout.DrawFittedText($"[液体魔杖: {modeName}] 已存: {count / 255.0:0.##} 格（{(Main.netMode == 1 ? ToolNetwork.LiquidStatus : "本次游戏")}） | [;] 吸收 | ['] 放置", LiquidHudX + 10, LiquidHudY + 8, LiquidHudW - 20, r, g, b);
             }
         }
     }
