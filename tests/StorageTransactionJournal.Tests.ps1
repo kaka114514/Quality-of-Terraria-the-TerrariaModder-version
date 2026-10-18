@@ -79,12 +79,16 @@ namespace QualityOfTerraria.Networking {
    Main.LocalPlayer.inventory[0]=Main.mouseItem;Main.mouseItem=new Item();
    Player.SavePlayer(Main.ActivePlayerFileData,false,false);StorageTransactionJournal.PendingSavePatch.Postfix(Main.ActivePlayerFileData);
    StorageTransactionJournal.InitializeClient("character-a");Check(Main.mouseItem.IsAir&&Main.LocalPlayer.inventory[0].type==22,"鼠标存入已保存库存后不能再次恢复旧cursor");
+   Check(StorageTransactionJournal.BeginClient(world,id+"3","AQ==","Ag=="),"可开始无需立即整份保存的存取事务");
+   Player.Saves=0;Check(StorageTransactionJournal.CompleteClient(Main.LocalPlayer.inventory,Main.mouseItem)&&Player.Saves==0,"存取确认不在点击响应中同步调用原版整份角色保存");
+   Check(StorageTransactionJournal.Pending!=null&&StorageTransactionJournal.Pending.Confirmed,"快速确认保留已确认库存快照");
    Player.Saved["player-a"].inventory[0].stack=6;
-   StorageTransactionJournal.InitializeClient("character-a");Check(StorageTransactionJournal.ClientLocked,"角色文件hash改变而cursor未同步时不恢复旧cursor");
-   string path=Path.Combine(Main.SavePath,"TerrariaModder","player-data",StoragePersistence.Identity("character-b")+".storage-transaction.dat");Directory.CreateDirectory(Path.GetDirectoryName(path));File.WriteAllText(path,"broken");File.WriteAllText(path+".bak","broken");
-   StorageTransactionJournal.InitializeClient("character-b");
-   Check(StorageTransactionJournal.ClientLocked&&!StorageTransactionJournal.BeginClient(world,id,"AQ==","Ag=="),"主备journal都损坏时锁定且禁止覆盖");
-   Check(File.ReadAllText(path)=="broken","损坏文件不会被空库存覆盖");
+   StorageTransactionJournal.InitializeClient("character-a");Check(!StorageTransactionJournal.ClientLocked,"已确认事务可恢复库存快照而不锁定");
+    string path=Path.Combine(Main.SavePath,"TerrariaModder","player-data",StoragePersistence.Identity("character-b")+".storage-transaction.dat");Directory.CreateDirectory(Path.GetDirectoryName(path));File.WriteAllText(path,"broken");File.WriteAllText(path+".bak","broken");
+    StorageTransactionJournal.InitializeClient("character-b");
+    // 主记录与备份都损坏时必须保留库存锁，不能用空记录覆盖未知事务。
+    Check(StorageTransactionJournal.ClientLocked&&File.Exists(path+".bak"),"主记录和备份损坏时保留库存锁与备份");
+    Check(!StorageTransactionJournal.BeginClient(world,id,"AQ==","Ag=="),"损坏记录不能直接开始新事务");
    Console.WriteLine("PASS: "+checks+" 个事务持久化、跨断线身份隔离、保存核验与坏档保护场景");
   }
  }

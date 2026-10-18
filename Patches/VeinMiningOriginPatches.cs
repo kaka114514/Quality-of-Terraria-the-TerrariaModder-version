@@ -1,72 +1,40 @@
 using System;
-using System.Collections.Generic;
-using System.Reflection;
-using System.Reflection.Emit;
 using HarmonyLib;
 using Terraria;
-using Terraria.ID;
-using Terraria.DataStructures;
 using QualityOfTerraria.Features;
 using QualityOfTerraria.Networking;
 using TerrariaModder.Core.Permissions;
 
 namespace QualityOfTerraria.Patches
 {
-    // 避免直接重写含有缺失可选 Steamworks 程序集引用的 GetData；只在原版 CheckBytes 调用点包裹它。
-    [HarmonyPatch(typeof(NetMessage), "CheckBytes", new[] { typeof(int) })]
-    internal static class VeinMiningOriginMessagePatch
+    // 服务端按客户端逐个处理入站包，原版破矿就发生在这次调用里；
+    // 用线程内的发送者即可定位来源，不再依赖具体包的字节布局。
+    [HarmonyPatch(typeof(NetMessage), "CheckBytes")]
+    internal static class VeinMiningOriginSessionPatch
     {
-        internal sealed class Context
+        [HarmonyPrefix]
+        internal static void Prefix(int bufferIndex, out int __state)
         {
-            internal int Sender, X, Y;
-        }
-        [ThreadStatic] internal static Context Current;
-
-        [HarmonyTranspiler]
-        internal static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
-        {
-            System.Reflection.MethodInfo original = typeof(MessageBuffer).GetMethod("GetData", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance,
-                null, new[] { typeof(int), typeof(int), typeof(int).MakeByRefType() }, null);
-            System.Reflection.MethodInfo replacement = typeof(VeinMiningOriginMessagePatch).GetMethod(nameof(ProcessGetData), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-            bool replaced = false;
-            foreach (CodeInstruction instruction in instructions)
-            {
-                if (instruction.operand is System.Reflection.MethodInfo target && target == original)
-                {
-                    instruction.opcode = System.Reflection.Emit.OpCodes.Call;
-                    instruction.operand = replacement;
-                    replaced = true;
-                }
-                yield return instruction;
-            }
-            if (!replaced) throw new MissingMethodException("NetMessage.CheckBytes 中找不到 MessageBuffer.GetData 调用点");
+            __state = VeinMiningOriginContext.Sender;
+            VeinMiningOriginContext.Sender = Main.netMode == 2 && !Mod.VeinMinerLegacyLoaded && bufferIndex >= 0 && bufferIndex < Main.maxPlayers ? bufferIndex : -1;
         }
 
-        internal static void ProcessGetData(MessageBuffer buffer, int start, int length, out int messageType)
-        {
-            Context previous = Current;
-            Current = null;
-            try
-            {
-                if (Main.netMode == 2 && Mod.WorldActive && !Mod.VeinMinerLegacyLoaded && buffer != null &&
-                    buffer.whoAmI >= 0 && buffer.whoAmI < Main.maxPlayers)
-                {
-                    byte[] data = buffer.readBuffer;
-                    if (data != null && start >= 0 && length >= 9 && start <= data.Length - 9 &&
-                        data[start] == MessageID.TileManipulation && data[start + 1] == 0 && BitConverter.ToInt16(data, start + 6) == 0)
-                    {
-                        Current = new Context { Sender = buffer.whoAmI, X = BitConverter.ToInt16(data, start + 2), Y = BitConverter.ToInt16(data, start + 4) };
-                    }
-                }
-                buffer.GetData(start, length, out messageType);
-            }
-            finally { Current = previous; }
-        }
+        [HarmonyPostfix]
+        internal static void Postfix(int __state) => VeinMiningOriginContext.Sender = __state;
     }
 
+    internal static class VeinMiningOriginContext
+    {
+        [ThreadStatic] internal static int Sender = -1;
+    }
+
+    // 只记录服务端确实破坏掉的矿石：掉落在原版流程内收集，来源证明供本玩家的连锁请求消费一次。
     [HarmonyPatch(typeof(WorldGen), "KillTile")]
     internal static class VeinMiningOriginTilePatch
     {
+        // 诊断计数：玩家数据包处理期间的破块次数与其中破掉的矿石次数。
+        internal static int PacketKills, PacketOreKills, PostfixCalls, PostfixStillActive, PostfixRecorded;
+
         internal sealed class State
         {
             internal Player Player;
@@ -78,15 +46,31 @@ namespace QualityOfTerraria.Patches
         internal static void Prefix(int i, int j, bool fail, bool effectOnly, out State __state)
         {
             __state = null;
-            var origin = VeinMiningOriginMessagePatch.Current;
-            if (origin == null || fail || effectOnly || origin.X != i || origin.Y != j || !WorldGen.InWorld(i, j, 3) || !PermissionService.HasModAccess(origin.Sender, "quality-of-terraria")) return;
-            Player player = Main.player[origin.Sender];
-            if (player == null || !player.active || player.dead || player.HeldItem == null || player.HeldItem.pick <= 0) return;
+            if (fail || effectOnly || Main.netMode != 2 || !Mod.WorldActive) return;
+            int sender = VeinMiningOriginContext.Sender;
+            if (sender < 0) return;
+            PacketKills++;
+            if (!PermissionService.HasModAccess(sender, "quality-of-terraria")) return;
+            Player player = Main.player[sender];
+            // 不在这里要求手持镐子：物品同步可能晚于破矿包，请求阶段会重新校验镐力与权限。
+            if (player == null || !player.active || player.dead) return;
+            if (!WorldGen.InWorld(i, j, 3)) return;
             Tile tile = Main.tile[i, j];
-            var config = SettingsSync.GetPlayerConfig(origin.Sender);
-            if (tile == null || !tile.active() || !VeinMiningSystem.IsOre(tile.type) || config == null ||
-                !player.IsInTileInteractionRange(i, j, TileReachCheckSettings.Simple, player.HeldItem.tileBoost) || !VeinMiningSystem.CanMineOrigin(player, i, j)) return;
+            if (tile == null || !tile.active() || !VeinMiningSystem.IsOre(tile.type)) return;
+            PacketOreKills++;
             __state = new State { Player = player, Type = tile.type, PreviousDrops = VeinMiningSystem.BeginDrops(player, i, j) };
+            // 先保存掉落捕获上下文；原版 KillTile 只有返回后才确定瓦片确实被破坏。
+        }
+
+        [HarmonyPostfix]
+        internal static void Postfix(int i, int j, State __state)
+        {
+            if (__state == null) return;
+            PostfixCalls++;
+            Tile after = Main.tile[i, j];
+            if (after != null && after.active()) { PostfixStillActive++; return; }
+            PostfixRecorded++;
+            VeinMiningNetwork.RecordBreak(__state.Player, i, j, __state.Type);
         }
 
         [HarmonyFinalizer]
@@ -95,8 +79,8 @@ namespace QualityOfTerraria.Patches
             if (__state == null) return __exception;
             try
             {
-                Tile after = Main.tile[i, j];
-                if (__exception == null && after != null && !after.active()) VeinMiningNetwork.RecordBreak(__state.Player, i, j, __state.Type);
+                // 来源证明只在 Postfix 确认实际破坏后写入；异常或失败时没有本次证明可撤销，
+                // 也不能误删同坐标上之前一次合法原版破块留下的证明。
             }
             finally { VeinMiningSystem.EndDrops(__state.PreviousDrops); }
             return __exception;

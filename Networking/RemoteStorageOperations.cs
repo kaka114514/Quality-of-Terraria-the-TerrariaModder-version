@@ -78,7 +78,11 @@ namespace QualityOfTerraria.Networking
         private static string _recoveryPending;
         private static ulong _lastRecovery;
         private static bool _recoveredInventory;
+        private static ulong _lastTransferMessage;
+        private static int _pendingTransferCount;
         private static KeyValuePair<long, bool>[] _markChanges;
+        private static ulong _lastBusyWarning; // 上次显示"请等待"提示的时间
+
         internal static bool Busy => _pending != null || StorageTransactionJournal.ClientLocked;
         internal static bool Ready => !string.IsNullOrEmpty(_token);
         internal static string WorldIdentity => Main.netMode == 2 ? ServerMarkedChests.WorldIdentity : _world;
@@ -99,16 +103,22 @@ namespace QualityOfTerraria.Networking
             int lifecycle = ++_lifecycle;
             _receiveRequest = (client, operation, payload) =>
             {
-                if (!operation.StartsWith(Prefix, StringComparison.Ordinal)) return;
+                if (!IsOperation(operation)) return;
                 NetworkRuntime.Enqueue(() => { if (_initialized && lifecycle == _lifecycle) HandleRequest(client, operation, payload); });
             };
             _receiveResponse = (success, operation, payload) =>
             {
-                if (!operation.StartsWith(Prefix, StringComparison.Ordinal)) return;
+                if (!IsOperation(operation)) return;
                 NetworkRuntime.Enqueue(() => { if (_initialized && lifecycle == _lifecycle) HandleResponse(success, operation, payload); });
             };
             NetSync.OnStorageRequest += _receiveRequest;
             NetSync.OnStorageResponse += _receiveResponse;
+        }
+
+        private static bool IsOperation(string operation)
+        {
+            return operation == Prefix + "hello" || operation == Prefix + "marks" || operation == Prefix + "move"
+                || operation == Prefix + "open" || operation == Prefix + "recover" || operation == Prefix + "closed";
         }
 
         internal static void Update()
@@ -124,35 +134,42 @@ namespace QualityOfTerraria.Networking
                     {
                         int index = peer.RemoteChest;
                         Main.player[client].chest = -1; peer.RemoteChest = -1;
-                        NetSync.SendStorageResponseTo(client, true, Prefix + "closed", Encode(writer => { writer.Write(peer.Token); writer.Write(0L); writer.Write(index); }));
+                        NetSyncPayload.SendResponseTo(client, true, Prefix + "closed", Encode(writer => { writer.Write(peer.Token); writer.Write(0L); writer.Write(index); }));
                     }
                 }
                 return;
             }
             if (Main.netMode != 1 || !UIManager.CanRender) return;
+            // 显示累积的转移消息（超时或批次完成）
+            if (_pendingTransferCount > 0 && Main.GameUpdateCount - _lastTransferMessage > 12)
+            {
+                Main.NewText($"已转移 {_pendingTransferCount} 件物品", 150, 230, 255);
+                _pendingTransferCount = 0;
+            }
             if (_remoteChest >= 0 && Main.LocalPlayer.chest != _remoteChest) _remoteChest = -1;
             if (!Ready)
             {
                 if (_lastHello != 0 && Main.GameUpdateCount - _lastHello < 120) return;
                 _lastHello = Main.GameUpdateCount;
-                NetSync.SendStorageRequest(Prefix + "hello", _hello);
+                NetSyncPayload.SendRequest(Prefix + "hello", _hello);
                 return;
             }
             if (_markPending != null && Main.GameUpdateCount - _lastMarks >= 180)
             {
                 _lastMarks = Main.GameUpdateCount;
-                NetSync.SendStorageRequest(Prefix + "marks", _markPending);
+                NetSyncPayload.SendRequest(Prefix + "marks", _markPending);
             }
             else if (_markPending == null) SynchronizeMarks();
             var recovery = StorageTransactionJournal.Pending;
-            if (_pending == null && recovery != null && !ToolNetwork.Busy)
+            // 已确认但尚未落盘的记录不再作为断线事务恢复；等待角色保存后自动清除。
+            if (_pending == null && recovery != null && !recovery.Confirmed && !ToolNetwork.Busy)
             {
                 if (recovery.World != _world) { Status = "角色有未确认的存取，请返回原服务器和原世界恢复库存。"; return; }
                 if (_recoveryPending == null || Main.GameUpdateCount - _lastRecovery >= 180)
                 {
                     _recoveryPending = Encode(writer => { writer.Write(_token); writer.Write(recovery.Id); });
                     _lastRecovery = Main.GameUpdateCount;
-                    NetSync.SendStorageRequest(Prefix + "recover", _recoveryPending);
+                    NetSyncPayload.SendRequest(Prefix + "recover", _recoveryPending);
                     Status = "正在恢复断线前的未确认库存";
                 }
             }
@@ -160,10 +177,10 @@ namespace QualityOfTerraria.Networking
             {
                 _lastSend = Main.GameUpdateCount;
                 Status = "等待服务器确认；正在查询同一操作，未再次扣除物品";
-                NetSync.SendStorageRequest(Prefix + "move", _pending);
+                NetSyncPayload.SendRequest(Prefix + "move", _pending);
             }
             if (_openPending != null && Main.GameUpdateCount - _lastOpen >= 180)
-            { _lastOpen = Main.GameUpdateCount; NetSync.SendStorageRequest(Prefix + "open", _openPending); }
+            { _lastOpen = Main.GameUpdateCount; NetSyncPayload.SendRequest(Prefix + "open", _openPending); }
         }
 
         private static string Encode(Action<BinaryWriter> write)
@@ -200,7 +217,10 @@ namespace QualityOfTerraria.Networking
                 if (operation == Prefix + "hello") { Hello(client, payload); return; }
                 Peer peer;
                 if (!ValidPeer(client, out peer)) return;
-                using (var reader = Decode(payload))
+                string complete;
+                if (!NetSyncPayload.TryAcceptRequest(client, operation, payload, out complete)) return;
+                payload = complete;
+                using (var reader = Decode(complete))
                 {
                     if (reader.ReadString() != peer.Token) return;
                     if (operation == Prefix + "marks") ChangeMarks(client, peer, payload, reader);
@@ -231,7 +251,7 @@ namespace QualityOfTerraria.Networking
             for (int part = 0; part < parts; part++)
             {
                 int offset = part * 128, count = Math.Min(128, marks.Length - offset), number = part;
-                NetSync.SendStorageResponseTo(client, true, Prefix + "hello", Encode(writer =>
+                NetSyncPayload.SendResponseTo(client, true, Prefix + "hello", Encode(writer =>
                 {
                     writer.Write(hello); writer.Write(peer.Token); writer.Write(world); writer.Write(StoragePersistence.Identity(peer.Identity));
                     writer.Write(number); writer.Write(parts); writer.Write(count);
@@ -244,7 +264,7 @@ namespace QualityOfTerraria.Networking
         {
             long sequence = reader.ReadInt64();
             if (sequence == peer.LastMarkSequence && peer.LastMarkRequest == payload)
-            { NetSync.SendStorageResponseTo(client, true, Prefix + "marks", peer.LastMarkReply); return; }
+            { NetSyncPayload.SendResponseTo(client, true, Prefix + "marks", peer.LastMarkReply); return; }
             if (sequence <= peer.LastMarkSequence) return;
             int count = reader.ReadInt32();
             if (count < 1 || count > 128) throw new InvalidDataException("标记数量不合法");
@@ -258,7 +278,7 @@ namespace QualityOfTerraria.Networking
                 foreach (long key in rejected) writer.Write(key);
             });
             peer.LastMarkSequence = sequence; peer.LastMarkRequest = payload; peer.LastMarkReply = response;
-            NetSync.SendStorageResponseTo(client, true, Prefix + "marks", response);
+            NetSyncPayload.SendResponseTo(client, true, Prefix + "marks", response);
         }
 
         private static void SynchronizeMarks()
@@ -274,7 +294,7 @@ namespace QualityOfTerraria.Networking
                 foreach (var change in _markChanges) { writer.Write(change.Key); writer.Write(change.Value); }
             });
             _lastMarks = Main.GameUpdateCount;
-            NetSync.SendStorageRequest(Prefix + "marks", _markPending);
+            NetSyncPayload.SendRequest(Prefix + "marks", _markPending);
         }
 
         internal static bool RequestTake(int chest, int slot, Item expected, bool all)
@@ -297,7 +317,7 @@ namespace QualityOfTerraria.Networking
             _openSequence = ++_sequence;
             _openPending = Encode(writer => { writer.Write(_token); writer.Write(_openSequence); writer.Write(index); writer.Write(chest.x); writer.Write(chest.y); });
             _lastOpen = Main.GameUpdateCount;
-            NetSync.SendStorageRequest(Prefix + "open", _openPending);
+            NetSyncPayload.SendRequest(Prefix + "open", _openPending);
             return true;
         }
 
@@ -320,7 +340,7 @@ namespace QualityOfTerraria.Networking
         {
             long sequence = reader.ReadInt64();
             if (sequence == peer.LastOpenSequence && peer.LastOpenRequest == payload)
-            { NetSync.SendStorageResponseTo(client, true, Prefix + "open", peer.LastOpenReply); return; }
+            { NetSyncPayload.SendResponseTo(client, true, Prefix + "open", peer.LastOpenReply); return; }
             if (sequence <= peer.LastOpenSequence) return;
             int index = reader.ReadInt32(), x = reader.ReadInt32(), y = reader.ReadInt32(); End(reader);
             bool valid = !Main.player[client].dead && ServerMarkedChests.CanAccess(client, index) && Main.chest[index].x == x && Main.chest[index].y == y;
@@ -339,7 +359,7 @@ namespace QualityOfTerraria.Networking
                 peer.RemoteChest = index; Main.player[client].chest = index;
                 NetMessage.SendTileSquare(client, x, y, 4);
             }
-            NetSync.SendStorageResponseTo(client, true, Prefix + "open", response);
+            NetSyncPayload.SendResponseTo(client, true, Prefix + "open", response);
         }
         internal static bool RequestToolbar(int action) => Request(action + 3, -1, -1, null);
         internal static bool RequestDeposit(Item item)
@@ -352,9 +372,15 @@ namespace QualityOfTerraria.Networking
         private static bool Request(int action, int chest, int slot, Item expected)
         {
             Player player = Main.LocalPlayer;
-            if (Main.netMode != 1 || !Ready || Busy || ToolNetwork.Busy || player == null || player.dead || player.itemAnimation > 0 || Terraria.GameContent.CraftingRequests.HasPendingRequests)
+            if (Main.netMode != 1 || !Ready || Busy || RemoteStorageSnapshots.RefreshPending || ToolNetwork.Busy || player == null || player.dead || player.itemAnimation > 0 || Terraria.GameContent.CraftingRequests.HasPendingRequests)
             {
-                Main.NewText(Busy || ToolNetwork.Busy ? "请等待上一次物品操作确认。" : "正在等待服务器准备箱子存取，请稍后再试。", 255, 210, 120);
+                // 限流：只在 30 帧（0.5 秒）内首次被拦截时提示
+                ulong now = Main.GameUpdateCount;
+                if (now - _lastBusyWarning >= 30)
+                {
+                    _lastBusyWarning = now;
+                    Main.NewText(Busy || RemoteStorageSnapshots.RefreshPending || ToolNetwork.Busy ? "请等待上一次远程存储操作确认。" : "正在等待服务器准备箱子存取，请稍后再试。", 255, 210, 120);
+                }
                 return false;
             }
             // 标记确认完成后才允许依赖它的物品操作。
@@ -364,7 +390,13 @@ namespace QualityOfTerraria.Networking
             for (int i = 0; i < 58; i++) _before[i] = new State(player.inventory[i]);
             _before[58] = new State(Main.mouseItem);
             player.inventory[58] = Main.mouseItem;
-            for (int i = 0; i < 59; i++) NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, player.whoAmI, i);
+            // 普通单格存取使用服务器已经同步的玩家背包快照；鼠标物品只需同步虚拟的
+            // 58 号槽。批量工具操作仍同步完整背包，以覆盖玩家刚整理过的槽位。
+            if (action == 2 || action == 7)
+                NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, player.whoAmI, action == 2 ? 58 : slot);
+            else if (action >= 3 && action <= 6)
+                for (int i = 0; i < 59; i++)
+                    NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, player.whoAmI, i);
             _pendingSequence = ++_sequence;
             string search = ExtremeStorageUI.SearchText ?? "";
             if (search.Length > 96) search = search.Substring(0, 96);
@@ -383,7 +415,8 @@ namespace QualityOfTerraria.Networking
                 Main.NewText(StorageTransactionJournal.Status, 255, 160, 100); return false;
             }
             Status = "正在等待服务器确认物品操作";
-            NetSync.SendStorageRequest(Prefix + "move", _pending);
+            Mod.LogInfo($"[终极存储] 客户端发送请求 seq={_pendingSequence} action={action} chest={chest} slot={slot}");
+            NetSyncPayload.SendRequest(Prefix + "move", _pending);
             return true;
         }
 
@@ -395,7 +428,7 @@ namespace QualityOfTerraria.Networking
             if (separator > 0) ToolNetwork.RevokeServerToken(client, id.Substring(0, separator));
             string previous;
             bool known = StorageTransactionJournal.TryGetServer(peer.Identity, id, out previous);
-            NetSync.SendStorageResponseTo(client, true, Prefix + "recover", Encode(writer =>
+            NetSyncPayload.SendResponseTo(client, true, Prefix + "recover", Encode(writer =>
             {
                 writer.Write(peer.Token); writer.Write(0L); writer.Write(id); writer.Write(known); writer.Write(previous != null);
                 writer.Write(previous ?? "");
@@ -404,17 +437,20 @@ namespace QualityOfTerraria.Networking
 
         private static void SynchronizeMarksIfIdle() { if (_markPending == null) SynchronizeMarks(); }
 
+
         private static void Execute(int client, Peer peer, string payload, BinaryReader reader)
         {
             long sequence = reader.ReadInt64();
             string saved;
             if (peer.Replies.TryGetValue(sequence, out saved))
             {
-                if (peer.Requests[sequence] == payload) NetSync.SendStorageResponseTo(client, true, Prefix + "move", saved);
+                Mod.LogInfo($"[终极存储] 服务器重放请求 seq={sequence} client={client}");
+                if (peer.Requests[sequence] == payload) NetSyncPayload.SendResponseTo(client, true, Prefix + "move", saved);
                 return;
             }
             if (sequence <= peer.LastSequence) return;
             int action = reader.ReadInt32(), chestIndex = reader.ReadInt32(), slot = reader.ReadInt32();
+            Mod.LogInfo($"[终极存储] 服务器执行请求 seq={sequence} client={client} action={action} chest={chestIndex} slot={slot}");
             State expected = State.Read(reader);
             int tab = reader.ReadInt32(), sort = reader.ReadInt32();
             string search = reader.ReadString();
@@ -427,7 +463,10 @@ namespace QualityOfTerraria.Networking
             string message = "操作已由服务器确认";
             bool valid = !player.dead && player.inventory.Length >= 59;
             for (int i = 0; valid && i < 59; i++) valid = before[i].Matches(player.inventory[i]);
-            var chests = ServerMarkedChests.GetReadable(client).ToList();
+            var readable = ServerMarkedChests.GetReadable(client).ToList();
+            // 单格取物只会读取一个来源箱子。之前每次点击都克隆所有标记箱，
+            // 箱子较多时服务器主线程会在一次响应中分配数万件 Item，造成联机卡顿。
+            List<Chest> chests = readable;
             if (!valid) message = "背包状态已变化，未转移物品，请重试";
             else if ((action == 0 || action == 1) &&
                 (!ServerMarkedChests.CanAccess(client, chestIndex) || slot < 0 || slot >= Main.chest[chestIndex].item.Length || !expected.Matches(Main.chest[chestIndex].item[slot])))
@@ -435,9 +474,15 @@ namespace QualityOfTerraria.Networking
             else if ((action == 2 || action == 7) && (slot < 0 || slot > 58 || !expected.Matches(player.inventory[slot])))
             { valid = false; message = "待存入物品已变化，未转移物品"; }
             else if (chests.Count == 0) { valid = false; message = "没有可操作的标记箱子"; }
+            if (valid && (action == 0 || action == 1))
+            {
+                Chest sourceChest = Main.chest[chestIndex];
+                chests = new List<Chest> { sourceChest };
+            }
             var stagedInventory = CloneSlots(player.inventory);
             var inventory = new Item[50];
             Item[][] boxes = valid ? chests.Select(chest => CloneSlots(chest.item)).ToArray() : new Item[0][];
+            var changedChestSlots = new Dictionary<int, List<int>>();
             if (valid)
             {
                 // 先在服务器实际库存的副本上计算，全部成功并缓存确认后一次提交。
@@ -446,7 +491,7 @@ namespace QualityOfTerraria.Networking
                 int moved = 0;
                 if (action == 0 || action == 1)
                 {
-                    Item source = boxes[chests.FindIndex(chest => chest.index == chestIndex)][slot];
+                    Item source = boxes[0][slot];
                     moved = StorageTransfers.Move(source, new[] { inventory }, false, action == 0 ? source.stack : Math.Max(1, source.stack / 2));
                 }
                 else if (action == 2 || action == 7) moved = StorageTransfers.Move(stagedInventory[slot], boxes);
@@ -469,7 +514,16 @@ namespace QualityOfTerraria.Networking
                                 moved += StorageTransfers.Move(item, new[] { inventory });
                 }
                 Array.Copy(inventory, stagedInventory, 50);
-                message = action == 5 ? "标记箱子已合并整理，不同前缀保持分开" : moved > 0 ? $"已转移 {moved} 件物品" : "没有可转移的物品或目标存储空间已满";
+                message = action == 5 ? "[终极存储]：标记箱子已整理" : moved > 0 ? $"已转移 {moved} 件物品" : "没有可转移的物品或目标存储空间已满";
+                for (int c = 0; c < chests.Count; c++)
+                    for (int s = 0; s < chests[c].item.Length; s++)
+                        if (!new State(boxes[c][s]).Matches(chests[c].item[s]))
+                        {
+                            List<int> slots;
+                            if (!changedChestSlots.TryGetValue(chests[c].index, out slots))
+                                changedChestSlots.Add(chests[c].index, slots = new List<int>());
+                            slots.Add(s);
+                        }
             }
             string response = Encode(writer =>
             {
@@ -488,11 +542,12 @@ namespace QualityOfTerraria.Networking
             {
                 long oldest = peer.Replies.Keys.Min(); peer.Replies.Remove(oldest); peer.Requests.Remove(oldest);
             }
-            NetSync.SendStorageResponseTo(client, true, Prefix + "move", response);
+            NetSyncPayload.SendResponseTo(client, true, Prefix + "move", response);
             if (valid)
-                foreach (Chest chest in chests)
-                    if (Chest.UsingChest(chest.index) == client)
-                        for (int s = 0; s < chest.item.Length; s++) NetMessage.SendData(MessageID.SyncChestItem, client, -1, null, chest.index, s);
+                foreach (var changed in changedChestSlots)
+                    if (Chest.UsingChest(changed.Key) == client)
+                        foreach (int s in changed.Value)
+                            NetMessage.SendData(MessageID.SyncChestItem, client, -1, null, changed.Key, s);
         }
 
         private static Item[] CloneSlots(Item[] slots)
@@ -503,11 +558,15 @@ namespace QualityOfTerraria.Networking
             if (Main.netMode != 1 || !success) return;
             try
             {
-                using (var reader = Decode(payload))
+                string complete;
+                if (!NetSyncPayload.TryAcceptResponse(operation, payload, out complete)) return;
+                using (var reader = Decode(complete))
                 {
                     if (operation == Prefix + "hello") { AcceptHello(reader); return; }
                     if (reader.ReadString() != _token) return;
                     long sequence = reader.ReadInt64();
+                    if (operation == Prefix + "move")
+                        Mod.LogInfo($"[终极存储] 客户端收到响应 seq={sequence} pending={_pendingSequence} busy={Busy}");
                     if (operation == Prefix + "recover")
                     {
                         string id = reader.ReadString(); bool known = reader.ReadBoolean(), executed = reader.ReadBoolean();
@@ -609,11 +668,17 @@ namespace QualityOfTerraria.Networking
                     // 库存输入在等待期间冻结。失败时绝不用服务器的过期库存覆盖当前库存。
                     if (valid && unchanged)
                     {
+                        var changedSlots = new List<int>();
                         for (int i = 0; i < 59; i++)
-                            if (!_before[i].Matches(after[i].Item())) player.inventory[i] = after[i].Item();
+                            if (!_before[i].Matches(after[i].Item()))
+                            {
+                                player.inventory[i] = after[i].Item();
+                                changedSlots.Add(i);
+                            }
                         if (_before[58].Matches(after[58].Item())) player.inventory[58] = Main.mouseItem;
                         else Main.mouseItem = player.inventory[58];
-                        for (int i = 0; i < 59; i++) NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, player.whoAmI, i);
+                        foreach (int slot in changedSlots)
+                            NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, player.whoAmI, slot);
                     }
                     else if (valid)
                     {
@@ -621,16 +686,45 @@ namespace QualityOfTerraria.Networking
                         Main.NewText(Status, 255, 160, 100);
                         return;
                     }
-                    if (!StorageTransactionJournal.CompleteClient())
+                    if (!StorageTransactionJournal.CompleteClient(player.inventory, Main.mouseItem))
                     {
-                        if (_recoveredInventory) _pending = null; // 新连接只查询恢复结果，不能用旧连接token重发修改请求。
+                        if (_recoveredInventory)
+                        {
+                            _pending = null; // 新连接只查询恢复结果，不能用旧连接token重发修改请求。
+                        }
                         Status = StorageTransactionJournal.Status; Main.NewText(Status, 255, 160, 100); return;
                     }
                     _pending = null; _before = null; _recoveryPending = null; _recoveredInventory = false;
                     Status = message;
-                    Main.NewText(message, 150, 230, 255);
-                    RemoteStorageSnapshots.Invalidate();
-                    ExtremeStorageUI.RefreshItems(); Recipe.UpdateRecipeList();
+
+                    // 合并短时间内的多个"已转移"消息，避免 Shift+扫过背包时重复提示。
+                    if (message.StartsWith("已转移 ") && message.Contains("件物品"))
+                    {
+                        int transferred;
+                        int start = message.IndexOf(' ') + 1;
+                        int end = message.IndexOf(' ', start);
+                        if (end > start && int.TryParse(message.Substring(start, end - start), out transferred))
+                        {
+                            ulong now = Main.GameUpdateCount;
+                            if (now - _lastTransferMessage <= 6) // 100ms 内合并（原 12 帧=200ms，改为 6 帧=100ms 更快显示）
+                            {
+                                _pendingTransferCount += transferred;
+                            }
+                            else
+                            {
+                                if (_pendingTransferCount > 0)
+                                    Main.NewText($"已转移 {_pendingTransferCount} 件物品", 150, 230, 255);
+                                _pendingTransferCount = transferred;
+                            }
+                            _lastTransferMessage = now;
+                        }
+                        else Main.NewText(message, 150, 230, 255);
+                    }
+                    else Main.NewText(message, 150, 230, 255);
+                    RemoteStorageSnapshots.RefreshAfterMutation();
+                    // 远程存取只改变背包和箱子数据；Recipe.UpdateRecipeList 会遍历全部配方，
+                    // 在多人响应主线程上会造成明显停顿。原版打开制作界面时会重新计算。
+                    ExtremeStorageUI.RefreshItems();
                 }
             }
             catch (Exception error) { Mod.LogError("读取远程存取确认失败；保留等待状态", error); }

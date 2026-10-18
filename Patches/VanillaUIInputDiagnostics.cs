@@ -1,6 +1,8 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Text;
 using HarmonyLib;
 using Microsoft.Xna.Framework.Input;
 using Terraria;
@@ -13,6 +15,7 @@ namespace QualityOfTerraria.Patches
     [HarmonyPatch]
     internal static class VanillaUIInputDiagnostics
     {
+        private static readonly FieldInfo RegisteredPanels = AccessTools.Field(typeof(UIRenderer), "_registeredPanels");
         private static ulong _lastClick;
         private static int _samples;
 
@@ -46,7 +49,28 @@ namespace QualityOfTerraria.Patches
                 $"reuse={player.reuseDelay} channel={player.channel} pendingReuse={player.pendingItemReuse} " +
                 $"mouseInterface={player.mouseInterface} blockMouse={Main.blockMouse} inventoryLock={StorageInventoryGuard.Locked} " +
                 $"coreBlocking={UIRenderer.IsBlocking} coreHover={UIRenderer.IsMouseOverAnyPanel()} paused={Main.gamePaused} " +
-                $"inventory={Main.playerInventory} options={Main.ingameOptionsWindow}");
+                $"inventory={Main.playerInventory} options={Main.ingameOptionsWindow} hoveredPanels={DescribeHoveredPanels()}");
+        }
+
+        private static string DescribeHoveredPanels()
+        {
+            var panels = RegisteredPanels?.GetValue(null) as IDictionary;
+            if (panels == null) return "unavailable";
+            int mouseX = UIRenderer.MouseX, mouseY = UIRenderer.MouseY;
+            var result = new StringBuilder();
+            foreach (DictionaryEntry entry in panels)
+            {
+                object bounds = entry.Value;
+                Type type = bounds.GetType();
+                int x = (int)type.GetField("Item1").GetValue(bounds);
+                int y = (int)type.GetField("Item2").GetValue(bounds);
+                int width = (int)type.GetField("Item3").GetValue(bounds);
+                int height = (int)type.GetField("Item4").GetValue(bounds);
+                if (mouseX < x || mouseX >= x + width || mouseY < y || mouseY >= y + height) continue;
+                if (result.Length > 0) result.Append(',');
+                result.Append(entry.Key).Append('@').Append(x).Append(',').Append(y).Append(',').Append(width).Append(',').Append(height);
+            }
+            return result.Length == 0 ? "none" : result.ToString();
         }
 
         internal static void ResetSession() { _lastClick = 0; _samples = 0; }

@@ -11,6 +11,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="github_push\**" />
+    <EmbeddedResource Remove="github_push\**" />
+    <None Remove="github_push\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" />
     <Reference Include="Terraria">
       <HintPath>D:\App\Game\Steam\steamapps\common\Terraria\Terraria.exe</HintPath>

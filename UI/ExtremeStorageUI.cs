@@ -50,6 +50,10 @@ namespace QualityOfTerraria.UI
         private static bool _isDragging = false;
         private static int _dragOffsetX = 0;
         private static int _dragOffsetY = 0;
+        private static bool _storageActionHeld;
+        private static int _storageActionNeutralFrames;
+        private static ulong _storageActionCooldownUntil;
+        private const ulong StorageActionCooldownFrames = 5;
 
         public static StorageTab CurrentTab = StorageTab.All;
         public static ItemSortMode CurrentSortMode = ItemSortMode.Default;
@@ -118,6 +122,9 @@ namespace QualityOfTerraria.UI
         {
             IsOpen = false;
             _isDragging = false;
+            _storageActionHeld = false;
+            _storageActionNeutralFrames = 0;
+            _storageActionCooldownUntil = 0;
             _search.Unfocus();
             _search.Clear();
             SearchText = "";
@@ -593,6 +600,8 @@ namespace QualityOfTerraria.UI
             if (!UIManager.CanRender || !IsOpen)
                 return;
 
+            UpdateStorageActionState();
+
             if (Patches.StorageInventoryGuard.Locked)
             {
                 UIRenderer.DrawPanel(PanelX, PanelY, PanelWidth, 64, 18, 22, 36, 240);
@@ -813,8 +822,9 @@ namespace QualityOfTerraria.UI
                                 {
                                     if (UIRenderer.MouseLeftClick)
                                     {
-                                        if (PutItemIntoAnyChest(Main.mouseItem))
+                                        if (BeginStorageAction() && PutItemIntoAnyChest(Main.mouseItem))
                                         {
+                                            ArmStorageActionCooldown();
                                             SoundEngine.PlaySound(SoundID.Grab);
                                             RefreshItems();
                                         }
@@ -829,13 +839,15 @@ namespace QualityOfTerraria.UI
                                     // 左键点击：取出到背包
                                     if (UIRenderer.MouseLeftClick)
                                     {
-                                        TakeItemToPlayer(slotRef, takeAll: true);
+                                        if (BeginStorageAction() && TakeItemToPlayer(slotRef, takeAll: true))
+                                            ArmStorageActionCooldown();
                                         UIRenderer.ConsumeClick();
                                     }
                                     // 右键点击：取出一半或单个
                                     else if (UIRenderer.MouseRightClick)
                                     {
-                                        TakeItemToPlayer(slotRef, takeAll: false);
+                                        if (BeginStorageAction() && TakeItemToPlayer(slotRef, takeAll: false))
+                                            ArmStorageActionCooldown();
                                         UIRenderer.ConsumeRightClick();
                                     }
                                 }
@@ -847,8 +859,9 @@ namespace QualityOfTerraria.UI
                         Main.player[Main.myPlayer].mouseInterface = true;
                         if (Main.mouseItem != null && !Main.mouseItem.IsAir && UIRenderer.MouseLeftClick)
                         {
-                            if (PutItemIntoAnyChest(Main.mouseItem))
+                            if (BeginStorageAction() && PutItemIntoAnyChest(Main.mouseItem))
                             {
+                                ArmStorageActionCooldown();
                                 SoundEngine.PlaySound(SoundID.Grab);
                                 RefreshItems();
                             }
@@ -1042,30 +1055,29 @@ namespace QualityOfTerraria.UI
             }
         }
 
-        private static void TakeItemToPlayer(ItemSlotRef slotRef, bool takeAll)
+        private static bool TakeItemToPlayer(ItemSlotRef slotRef, bool takeAll)
         {
             Player player = Main.LocalPlayer;
             if (player == null || slotRef.Item == null || slotRef.Item.IsAir)
-                return;
+                return false;
 
             if (Main.netMode == 1)
             {
-                RemoteStorageOperations.RequestTake(slotRef.ChestIndex, slotRef.SlotIndex, slotRef.Item, takeAll);
-                return;
+                return RemoteStorageOperations.RequestTake(slotRef.ChestIndex, slotRef.SlotIndex, slotRef.Item, takeAll);
             }
 
             if (!CanMutateChest(slotRef.ChestIndex))
             {
                 Main.NewText("联机存取请先在游戏中打开该箱子；远程快照只能查看和合成。", 255, 210, 120);
-                return;
+                return false;
             }
             Chest chest = Main.chest[slotRef.ChestIndex];
             if (chest == null || chest.item == null || slotRef.SlotIndex < 0 || slotRef.SlotIndex >= chest.item.Length)
-                return;
+                return false;
 
             Item chestItem = chest.item[slotRef.SlotIndex];
             if (chestItem == null || chestItem.IsAir || chestItem.stack <= 0)
-                return;
+                return false;
 
             int countToTake = takeAll ? chestItem.stack : Math.Max(1, chestItem.stack / 2);
             Item itemToGive = chestItem.Clone();
@@ -1093,7 +1105,9 @@ namespace QualityOfTerraria.UI
                 Recipe.UpdateRecipeList();
                 SoundEngine.PlaySound(SoundID.Grab);
                 RefreshItems();
+                return true;
             }
+            return false;
         }
 
         private static bool DrawButton(string text, int x, int y, int width, int height, bool selected = false, bool enabled = true)
@@ -1163,13 +1177,14 @@ namespace QualityOfTerraria.UI
 
         private static void HandleToolbarAction(int actionIndex)
         {
+            if (!BeginStorageAction()) return;
             Player player = Main.LocalPlayer;
             if (player == null || Main.chest == null)
                 return;
 
             if (Main.netMode == 1)
             {
-                RemoteStorageOperations.RequestToolbar(actionIndex);
+                if (RemoteStorageOperations.RequestToolbar(actionIndex)) ArmStorageActionCooldown();
                 return;
             }
 
@@ -1190,6 +1205,50 @@ namespace QualityOfTerraria.UI
             }
 
             RefreshItems();
+            ArmStorageActionCooldown();
+        }
+
+        // 远程操作确认后会在后续帧解锁库存；鼠标仍按住时不能把同一点击变成多次请求。
+        private static bool BeginStorageAction()
+        {
+            if (_storageActionHeld) return false;
+            if (Main.GameUpdateCount < _storageActionCooldownUntil) return false;
+            _storageActionHeld = true;
+            _storageActionNeutralFrames = 0;
+            return true;
+        }
+
+        private static void UpdateStorageActionState()
+        {
+            bool inputActive = Main.mouseLeft || Main.mouseRight || UIRenderer.MouseLeftClick || UIRenderer.MouseRightClick;
+            if (inputActive)
+            {
+                _storageActionNeutralFrames = 0;
+                return;
+            }
+            if (_storageActionHeld && ++_storageActionNeutralFrames >= 1)
+            {
+                _storageActionHeld = false;
+                _storageActionNeutralFrames = 0;
+            }
+        }
+
+        private static void ArmStorageActionCooldown()
+        {
+            _storageActionCooldownUntil = Main.GameUpdateCount + StorageActionCooldownFrames;
+        }
+
+        // Shift 快速存储入口：检查是否可以开始存储（供 InventoryAndReforgePatches 调用）
+        public static bool BeginQuickDeposit()
+        {
+            // 只检查冷却，不需要按住锁存（Shift 存储不会连续触发同一个槽位）
+            return Main.GameUpdateCount >= _storageActionCooldownUntil;
+        }
+
+        // Shift 快速存储成功后设置冷却（供 InventoryAndReforgePatches 调用）
+        public static void ArmQuickDepositCooldown()
+        {
+            _storageActionCooldownUntil = Main.GameUpdateCount + StorageActionCooldownFrames;
         }
 
         private static void DepositMatchingItems()

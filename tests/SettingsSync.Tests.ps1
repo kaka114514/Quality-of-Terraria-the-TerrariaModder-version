@@ -36,7 +36,7 @@ namespace TerrariaModder.Core.Net {
   public static bool LocalPlayerIsAdmin;
   public static List<Tuple<int,bool,string,string>> Sent=new List<Tuple<int,bool,string,string>>();
   public static void SendStorageRequest(string op,string data){OnStorageRequest?.Invoke(Terraria.Main.myPlayer,op,data);}
-  public static void SendStorageResponseTo(int slot,bool ok,string op,string data){Sent.Add(Tuple.Create(slot,ok,op,data));}
+  public static void SendStorageResponseTo(int slot,bool ok,string op,string data){string full;if(!QualityOfTerraria.Networking.NetSyncPayload.TryAcceptResponse(op,data,out full))return;Sent.Add(Tuple.Create(slot,ok,op,full));}
   public static void BroadcastConfigChange(string id,TerrariaModder.Core.Config.ConfigPropertyMeta p,TerrariaModder.Core.Config.ModConfig c,int slot){Broadcasts++;}
   public static int Broadcasts;
   public static void Request(int slot,string op,string data){OnStorageRequest?.Invoke(slot,op,data);}
@@ -114,7 +114,7 @@ namespace QualityOfTerraria.Networking {
  }
 }
 '@
-$production = (Get-Content (Join-Path $root 'Networking/NetworkRuntime.cs') -Raw) + (Get-Content (Join-Path $root 'Networking/SettingsSync.cs') -Raw)
+$production = (Get-Content (Join-Path $root 'Networking/NetworkRuntime.cs') -Raw) + (Get-Content (Join-Path $root 'Networking/NetSyncPayload.cs') -Raw) + (Get-Content (Join-Path $root 'Networking/SettingsSync.cs') -Raw)
 $usings = [regex]::Matches(($production + $fake), '(?m)^using [^;]+;') | ForEach-Object Value | Sort-Object -Unique
 $fake = [regex]::Replace($fake, '(?m)^using [^;]+;', '')
 $production = [regex]::Replace($production, '(?m)^using [^;]+;', '')

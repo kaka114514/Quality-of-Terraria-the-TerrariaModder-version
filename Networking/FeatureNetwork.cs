@@ -129,7 +129,7 @@ namespace QualityOfTerraria.Networking
             {
                 writer.Write(_pending); writer.Write(_nonce ?? ""); writer.Write(++_sequence);
                 writer.Write(action); writer.Write(x); writer.Write(y);
-                NetSync.SendStorageRequest(Operation, Convert.ToBase64String(stream.ToArray()));
+                NetSyncPayload.SendRequest(Operation, Convert.ToBase64String(stream.ToArray()));
             }
             return true;
         }
@@ -150,8 +150,10 @@ namespace QualityOfTerraria.Networking
         private static void ReceiveRequest(int client, string operation, string payload)
         {
             if (!_initialized || operation != Operation) return;
+            string complete;
+            if (!NetSyncPayload.TryAcceptRequest(client, operation, payload, out complete)) return;
             int generation = _generation;
-            NetworkRuntime.Enqueue(() => { if (_initialized && generation == _generation) HandleRequest(client, payload); });
+            NetworkRuntime.Enqueue(() => { if (_initialized && generation == _generation) HandleRequest(client, complete); });
         }
 
         private static void HandleRequest(int client, string payload)
@@ -180,7 +182,7 @@ namespace QualityOfTerraria.Networking
                     }
                     if (peer != null && peer.Request == payload)
                     {
-                        if (peer.Response != null) NetSync.SendStorageResponseTo(client, peer.Success, Operation, peer.Response);
+                        if (peer.Response != null) NetSyncPayload.SendResponseTo(client, peer.Success, Operation, peer.Response);
                         return;
                     }
                     if (action == "hello")
@@ -246,15 +248,17 @@ namespace QualityOfTerraria.Networking
                 writer.Write(token); writer.Write(peer == null ? "" : peer.Nonce); writer.Write(action); writer.Write(x); writer.Write(y);
                 string payload = Convert.ToBase64String(stream.ToArray());
                 if (remember && peer != null) { peer.Response = payload; peer.Success = success; }
-                NetSync.SendStorageResponseTo(client, success, Operation, payload);
+                NetSyncPayload.SendResponseTo(client, success, Operation, payload);
             }
         }
 
         private static void ReceiveResponse(bool success, string operation, string payload)
         {
             if (!_initialized || operation != Operation) return;
+            string complete;
+            if (!NetSyncPayload.TryAcceptResponse(operation, payload, out complete)) return;
             int generation = _generation;
-            NetworkRuntime.Enqueue(() => { if (_initialized && generation == _generation) HandleResponse(success, payload); });
+            NetworkRuntime.Enqueue(() => { if (_initialized && generation == _generation) HandleResponse(success, complete); });
         }
 
         private static void HandleResponse(bool success, string payload)

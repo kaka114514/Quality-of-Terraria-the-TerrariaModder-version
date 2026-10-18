@@ -232,7 +232,6 @@ namespace QualityOfTerraria.UI
         {
             if (Main.netMode == 1)
             {
-                if (!NetSync.LocalPlayerIsAdmin) { Main.NewText("只有房主或管理员可以调整房间刷怪倍率。", 255, 180, 100); return; }
                 ToolNetwork.Request("spawn-rate", -1, (int)Math.Round(value * 10f));
             }
             else if (!WorldQoLCompletionPatches.SetSpawnRate(value)) Main.NewText("刷怪倍率保存失败，已保留原值。", 255, 180, 100);
@@ -245,7 +244,7 @@ namespace QualityOfTerraria.UI
             if (hover && UIRenderer.MouseLeftClick)
             {
                 if (Main.netMode == 1 && !NetSync.LocalPlayerIsAdmin) Main.NewText("只有房主或管理员可以调整房间刷怪倍率。", 255, 180, 100);
-                else _sliderDragging = true;
+                _sliderDragging = true;
                 UIRenderer.ConsumeClick();
             }
             if (_sliderDragging)
@@ -280,8 +279,7 @@ namespace QualityOfTerraria.UI
             {
                 if (Main.netMode == 1)
                 {
-                    if (NetSync.LocalPlayerIsAdmin) ToolNetwork.Request("world-toggle", -1, control, state ? 0 : 1);
-                    else Main.NewText("只有房主或管理员可以调整共享世界规则。", 255, 180, 100);
+                    ToolNetwork.Request("world-toggle", -1, control, state ? 0 : 1);
                 }
                 else onToggle?.Invoke();
                 UIRenderer.ConsumeClick();

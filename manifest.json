@@ -1,7 +1,7 @@
 {
   "id": "quality-of-terraria",
   "name": "Quality of Terraria 更好的体验",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "framework_version": ">=0.4.1",
   "author": "487666123 / Ported for TerrariaModder",
   "description": "移植自 tModLoader MOD 更好的体验",
@@ -42,12 +42,6 @@
       "label": "随身大背包",
       "description": "呼出100格额外随身独立仓库",
       "default": "B"
-    },
-    {
-      "id": "wall-wand",
-      "label": "快速铺墙",
-      "description": "使用背包中的背景墙，快速铺满周围无墙区域",
-      "default": "O"
     },
     {
       "id": "weather-control",

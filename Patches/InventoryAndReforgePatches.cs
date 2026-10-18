@@ -216,6 +216,10 @@ namespace QualityOfTerraria.Patches
                             }
                             else if (QualityOfTerraria.UI.ExtremeStorageUI.IsOpen)
                             {
+                                // 终极存储需要经过冷却检查，避免扫过物品重复触发
+                                if (!QualityOfTerraria.UI.ExtremeStorageUI.BeginQuickDeposit())
+                                    return false; // 冷却中，拦截原版逻辑但不执行存储
+
                                 int origStack = item.stack;
                                 QualityOfTerraria.UI.ExtremeStorageUI.PutItemIntoAnyChest(item);
                                 if (item.IsAir || item.stack < origStack)
@@ -223,6 +227,7 @@ namespace QualityOfTerraria.Patches
                                     SoundEngine.PlaySound(SoundID.Grab);
                                     QualityOfTerraria.UI.ExtremeStorageUI.RefreshItems();
                                     Recipe.UpdateRecipeList();
+                                    QualityOfTerraria.UI.ExtremeStorageUI.ArmQuickDepositCooldown();
                                     return false; // 拦截默认逻辑
                                 }
                             }

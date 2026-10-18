@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot
-$sources = @('Networking/RemoteStorageOperations.cs','Networking/ServerMarkedChests.cs','Networking/StorageTransfers.cs','StoragePersistence.cs') | ForEach-Object {
+$sources = @('Networking/NetSyncPayload.cs','Networking/RemoteStorageOperations.cs','Networking/ServerMarkedChests.cs','Networking/StorageTransfers.cs','StoragePersistence.cs') | ForEach-Object {
     [regex]::Replace((Get-Content (Join-Path $root $_) -Raw), '(?m)^using [^;]+;\s*', '')
 }
 $stub = @'
@@ -42,11 +42,12 @@ namespace Terraria {
  }
  public static class Recipe {public static void UpdateRecipeList(){}}
  public static class NetMessage {
-  public static bool FailChest;
+  public static bool FailChest; public static int EquipmentSyncs,ChestSyncs;
   public static void SendTileSquare(int player,int x,int y,int size){}
   public static void SendData(int id,int remote=-1,int ignore=-1,object text=null,int player=0,int slot=0){
+   if(id==MessageID.SyncEquipment)EquipmentSyncs++;
    if(id==MessageID.SyncEquipment&&Main.netMode==1)Main.player[player].inventory[slot]=Main.LocalPlayer.inventory[slot].Clone();
-   if(id==MessageID.SyncChestItem&&FailChest)throw new IOException("injected chest packet failure");
+   if(id==MessageID.SyncChestItem){ChestSyncs++;if(FailChest)throw new IOException("injected chest packet failure");}
   }
  }
 }
@@ -65,16 +66,17 @@ namespace TerrariaModder.Core.Net {
  }
 }
 namespace QualityOfTerraria {
- public static class Mod {public static bool WorldActive=true;public static List<string> Errors=new List<string>();public static void LogError(string s,Exception e){Errors.Add(s+e.Message);} }
+ public static class Mod {public static bool WorldActive=true;public static List<string> Errors=new List<string>();public static void LogError(string s,Exception e){Errors.Add(s+e.Message);}public static void LogInfo(string s){} }
 }
 namespace QualityOfTerraria.Networking {
  public static class StorageTransactionJournal {
-  public class ClientRecord {public string World,Id,Before,Request;}
-  public static ClientRecord Pending;public static bool ClientLocked {get{return Pending!=null;}}public static string Status="";
+  public class ClientRecord {public string World,Id,Before,Request,After;public bool Confirmed;}
+  public static ClientRecord Pending;public static bool ClientLocked {get{return Pending!=null&&!Pending.Confirmed;}}public static string Status="";
   static Dictionary<string,string> Results=new Dictionary<string,string>();static Dictionary<string,HashSet<string>> Tokens=new Dictionary<string,HashSet<string>>();static Dictionary<string,string> Current=new Dictionary<string,string>();
   public static void InitializeClient(string id){}public static void InitializeServer(string world){}
   public static bool BeginClient(string world,string id,string before,string request){Pending=new ClientRecord{World=world,Id=id,Before=before,Request=request};return true;}
   public static bool CompleteClient(){Pending=null;return true;}
+  public static bool CompleteClient(Item[] inventory,Item cursor){if(Pending!=null){Pending.Confirmed=true;Pending.After="confirmed";}return true;}
   public static void RegisterServerToken(string guid,string token){if(!Tokens.ContainsKey(guid))Tokens[guid]=new HashSet<string>();Tokens[guid].Add(token);Current[guid]=token;}
   public static void RecordServer(string guid,string id,string response){Results[guid+":"+id]=response;}
   public static bool TryGetServer(string guid,string id,out string response){if(Results.TryGetValue(guid+":"+id,out response))return true;string token=id.Substring(0,id.LastIndexOf('.'));return Tokens.ContainsKey(guid)&&Tokens[guid].Contains(token)&&Current[guid]!=token;}
@@ -86,7 +88,7 @@ namespace QualityOfTerraria.UI {
  public enum StorageTab {All,Weapons,Armor,Accessories,Tools,Ammo,Blocks,Alchemy,Furniture,ChestManager,Settings}
  public enum ItemSortMode {Default,Rarity,Stack,Name,ID,Kind}
  public static class UIManager {public static bool CanRender=true;}
- public static class RemoteStorageSnapshots {public static void Initialize(){}public static void Invalidate(){}}
+ public static class RemoteStorageSnapshots {public static bool RefreshPending;public static void Initialize(){}public static void Invalidate(){}public static void RefreshAfterMutation(){}}
  public static class ExtremeStorageUI {
   public static HashSet<long> Marks=new HashSet<long>();public static string SearchText="";public static StorageTab CurrentTab;public static ItemSortMode CurrentSortMode;
   public static IEnumerable<long> GetMarkedCoordinates(){return Marks;}public static void AcceptServerMarks(string world,string owner,IEnumerable<long> marks){Marks.UnionWith(marks);}
@@ -119,7 +121,7 @@ namespace QualityOfTerraria.Networking {
   static Packet LastMove(){return NetSync.Requests.Last(p=>p.Operation.EndsWith("move"));}
   public static void Run(){
    try {
-    Main.chest[0]=new Chest{index=0,x=1,y=1};Main.chest[1]=new Chest{index=1,x=900,y=900};
+    Main.chest[0]=new Chest{index=0,x=1,y=1};Main.chest[1]=new Chest{index=1,x=900,y=900,Owner=0};
     Main.chest[0].item[0]=I(10,70,4);Main.chest[1].item[0]=I(10,40,5);
     Main.netMode=2;Check(RemoteStorageOperations.WorldIdentity==ServerMarkedChests.WorldIdentity,"服务器世界身份不得依赖客户端握手字段");Main.netMode=1;
     RemoteStorageOperations.Initialize();RemoteStorageOperations.Update();
@@ -128,9 +130,9 @@ namespace QualityOfTerraria.Networking {
     RemoteStorageOperations.Update();var oldMarks=NetSync.Requests.Single();RoundTrip();
     Main.netMode=2;Check(ServerMarkedChests.IsMarked(0,Main.chest[0])&&ServerMarkedChests.IsMarked(0,Main.chest[1]),"跨世界远端坐标个人标记确认");
     Check(!ServerMarkedChests.IsMarked(1,Main.chest[0]),"两玩家标记不共享");Main.netMode=1;
-    Check(RemoteStorageOperations.RequestTake(1,0,Main.chest[1].item[0],true),"远端无需靠近可请求取出");var move=LastMove();
+    NetMessage.EquipmentSyncs=0;NetMessage.ChestSyncs=0;Check(RemoteStorageOperations.RequestTake(1,0,Main.chest[1].item[0],true),"远端无需靠近可请求取出");Check(NetMessage.EquipmentSyncs==0,"远端取物请求不广播59个未变化装备槽");var move=LastMove();
     Check(Main.LocalPlayer.inventory[0].IsAir&&Main.chest[1].item[0].stack==40,"请求阶段不能本地改物品");Server();
-    Check(Main.player[0].inventory[0].stack==40&&Main.player[0].inventory[0].prefix==5&&Main.chest[1].item[0].IsAir,"服务器取出保留前缀和数量");
+    Check(Main.player[0].inventory[0].stack==40&&Main.player[0].inventory[0].prefix==5&&Main.chest[1].item[0].IsAir,"服务器取出保留前缀和数量");Check(NetMessage.ChestSyncs==1,"服务器单格取物只同步发生变化的箱子槽位");
     Client();Check(Main.LocalPlayer.inventory[0].stack==40&&!RemoteStorageOperations.Busy,"确认后才更新角色背包");
     NetSync.Requests.Add(move);RoundTrip();Check(Main.LocalPlayer.inventory[0].stack==40,"重复请求不重复发放");
     RemoteStorageOperations.RequestToolbar(0);RoundTrip();Check(Main.LocalPlayer.inventory[0].IsAir&&Main.chest.Any(c=>c!=null&&c.item.Any(i=>i.type==10&&i.prefix==5&&i.stack==40)),"全部存入保持前缀守恒");
@@ -161,8 +163,20 @@ namespace QualityOfTerraria.Networking {
     Check(RemoteStorageOperations.RequestOpenChest(0),"原版箱子界面可申请远程打开");RoundTrip();
     Check(Main.LocalPlayer.chest==0&&RemoteStorageOperations.KeepRemoteChest(Main.LocalPlayer),"服务器确认后原版箱子界面保持远程会话");
     Main.chest[0].Locked=true;Check(!RemoteStorageOperations.KeepRemoteChest(Main.LocalPlayer),"远程打开仍遵守锁箱限制");Main.chest[0].Locked=false;
+    // 新增：测试已确认但未落盘的记录不再发送 recover
+    Main.chest[1].item[0]=I(33,20,3);ExtremeStorageUI.Marks.Add(ServerMarkedChests.Key(Main.chest[1]));RemoteStorageOperations.Update();RoundTrip();
+    NetSync.Requests.Clear();NetSync.Responses.Clear();
+    Check(RemoteStorageOperations.RequestTake(1,0,Main.chest[1].item[0],true),"开始第一次取物请求");RoundTrip();
+    Check(Main.LocalPlayer.inventory.Any(i=>i.type==33&&i.stack==20),"第一次取物成功");
+    Check(StorageTransactionJournal.Pending!=null&&StorageTransactionJournal.Pending.Confirmed,"CompleteClient保留Confirmed记录");
+    Check(!RemoteStorageOperations.Busy,"已确认记录不锁库存");
+    int oldRequests=NetSync.Requests.Count;for(int tick=0;tick<200;tick++){Main.GameUpdateCount++;RemoteStorageOperations.Update();}
+    Check(NetSync.Requests.Count==oldRequests,"已确认记录200帧内不发送recover请求");
+    Check(NetSync.Requests.All(r=>!r.Operation.EndsWith("recover")),"Update循环不得误当断线事务");
+    int oldMessages=Main.Messages.Count;for(int tick=0;tick<10;tick++){Client();}
+    Check(Main.Messages.Count==oldMessages,"已确认记录不再重复显示提示");
     RemoteStorageOperations.ResetSession();Check(!RemoteStorageOperations.Ready&&!RemoteStorageOperations.Busy&&NetSync.OnStorageRequest==null,"退出精确解绑并清会话");
-    Console.WriteLine("PASS: "+checks+" 个真实生产协议、服务器物品守恒与重放场景（模拟传输）");
+    Console.WriteLine("PASS: "+checks+" 个真实生产协议、服务器物品守恒、重放与已确认记录场景（模拟传输）");
    } finally {RemoteStorageOperations.ResetSession();}
   }
  }

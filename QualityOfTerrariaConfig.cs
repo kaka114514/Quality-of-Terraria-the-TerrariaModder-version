@@ -4,6 +4,8 @@ using System.IO;
 using System.Linq;
 using TerrariaModder.Core.Config;
 
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("QualityOfTerraria.Server")]
+
 namespace QualityOfTerraria
 {
     public class QualityOfTerrariaConfig : ModConfig
@@ -382,6 +384,12 @@ namespace QualityOfTerraria
         public bool FastExtractinator { get; set; } = true;
 
         [Client]
+        [Label("自动钓鱼间隔（秒）")]
+        [Range(1, 60)]
+        [Description("自动钓鱼每次尝试之间的间隔，默认10秒。")]
+        public int AutoFishingIntervalSeconds { get; set; } = 10;
+
+        [Client]
         [Label("钓鱼无水池大小惩罚")]
         [Description("任意大小水池（包括极小池塘）均具备满渔力，不再受到渔力削弱。")]
         public bool NoFishingPenalty { get; set; } = true;
@@ -435,7 +443,7 @@ namespace QualityOfTerraria
         // ================= 快捷工具与魔杖 =================
         [Client]
         [Label("建筑魔杖不消耗材料")]
-        [Description("快速放置和快速铺墙时不消耗背包材料。")]
+        [Description("快速放置时不消耗背包材料。")]
         public bool WandMaterialNoConsume { get; set; } = false;
     }
 }

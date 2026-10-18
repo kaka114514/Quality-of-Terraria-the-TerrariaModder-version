@@ -64,12 +64,16 @@ namespace QualityOfTerraria.Networking
             _requestHandler = (slot, operation, payload) =>
             {
                 if (operation == null || !operation.StartsWith(Prefix, StringComparison.Ordinal) || payload == null || payload.Length > 32000) return;
-                NetworkRuntime.Enqueue(() => { if (lifecycle == _lifecycle && Mod.WorldActive) HandleRequest(slot, operation, payload); });
+                string complete;
+                if (!NetSyncPayload.TryAcceptRequest(slot, operation, payload, out complete)) return;
+                NetworkRuntime.Enqueue(() => { if (lifecycle == _lifecycle && Mod.WorldActive) HandleRequest(slot, operation, complete); });
             };
             _responseHandler = (ok, operation, payload) =>
             {
                 if (operation == null || !operation.StartsWith(Prefix, StringComparison.Ordinal) || payload == null || payload.Length > 32000) return;
-                NetworkRuntime.Enqueue(() => { if (lifecycle == _lifecycle && Mod.WorldActive) HandleResponse(ok, operation, payload); });
+                string complete;
+                if (!NetSyncPayload.TryAcceptResponse(operation, payload, out complete)) return;
+                NetworkRuntime.Enqueue(() => { if (lifecycle == _lifecycle && Mod.WorldActive) HandleResponse(ok, operation, complete); });
             };
             NetSync.OnStorageRequest += _requestHandler;
             NetSync.OnStorageResponse += _responseHandler;
@@ -153,7 +157,7 @@ namespace QualityOfTerraria.Networking
             if (_lastPersonal != null && snapshot.Count == _lastPersonal.Count && snapshot.All(p => _lastPersonal.ContainsKey(p.Key) && Equals(p.Value, _lastPersonal[p.Key]))) return;
             string error;
             if (!ValidateSnapshot(snapshot, out error)) { Status = error; return; }
-            NetSync.SendStorageRequest(Prefix + "personal", Write(w => { Header(w); WriteSnapshot(w, snapshot); }));
+            NetSyncPayload.SendRequest(Prefix + "personal", Write(w => { Header(w); WriteSnapshot(w, snapshot); }));
             _lastPersonal = snapshot;
         }
 
@@ -174,7 +178,7 @@ namespace QualityOfTerraria.Networking
             var snapshot = Metadata().ToDictionary(p => p.Key, p => p.GetValue(Mod.Config), StringComparer.Ordinal);
             string error;
             if (!ValidateSnapshot(snapshot, out error)) { Status = error; return; }
-            NetSync.SendStorageRequest(Prefix + "create", Write(w => { Header(w); WriteSnapshot(w, snapshot); }));
+            NetSyncPayload.SendRequest(Prefix + "create", Write(w => { Header(w); WriteSnapshot(w, snapshot); }));
             Status = "申请已发送，等待其他玩家同意";
         }
 
@@ -183,7 +187,7 @@ namespace QualityOfTerraria.Networking
             if (!row.Incoming || !row.Pending || _room == null) return;
             row.Pending = false;
             row.State = approve ? "已同意，等待服务器核验" : "已拒绝";
-            NetSync.SendStorageRequest(Prefix + "decision", Write(w => { Header(w); w.Write(row.Id); w.Write(approve); }));
+            NetSyncPayload.SendRequest(Prefix + "decision", Write(w => { Header(w); w.Write(row.Id); w.Write(approve); }));
         }
 
         private static IEnumerable<ConfigPropertyMeta> Metadata()
@@ -215,7 +219,7 @@ namespace QualityOfTerraria.Networking
 
         private static void Hello()
         {
-            if (_clientNonce != null) NetSync.SendStorageRequest(Prefix + "hello", Write(w => { w.Write(Version); w.Write(_clientNonce); WriteSnapshot(w, PersonalSnapshot()); }));
+            if (_clientNonce != null) NetSyncPayload.SendRequest(Prefix + "hello", Write(w => { w.Write(Version); w.Write(_clientNonce); WriteSnapshot(w, PersonalSnapshot()); }));
         }
 
         private static void HandleRequest(int slot, string operation, string payload)
@@ -363,7 +367,7 @@ namespace QualityOfTerraria.Networking
                         if (row == null) { Applying.Remove(id); return; }
                         string result = ApplyPersonal(snapshot) + "；" + worldResult;
                         row.State = result; Status = result;
-                        NetSync.SendStorageRequest(Prefix + "applied", Write(w => { Header(w); w.Write(id); w.Write(result.Length > 500 ? result.Substring(0, 500) : result); }));
+                        NetSyncPayload.SendRequest(Prefix + "applied", Write(w => { Header(w); w.Write(id); w.Write(result.Length > 500 ? result.Substring(0, 500) : result); }));
                     }
                     else if (operation == Prefix + "result")
                     {
@@ -484,7 +488,7 @@ namespace QualityOfTerraria.Networking
         {
             Peer peer;
             if (!Peers.TryGetValue(slot, out peer)) return;
-            NetSync.SendStorageResponseTo(slot, ok, Prefix + operation, Write(w => { w.Write(Version); w.Write(peer.Nonce); w.Write(_room); body?.Invoke(w); }));
+            NetSyncPayload.SendResponseTo(slot, ok, Prefix + operation, Write(w => { w.Write(Version); w.Write(peer.Nonce); w.Write(_room); body?.Invoke(w); }));
         }
         private static void Header(BinaryWriter writer) { writer.Write(Version); writer.Write(_clientNonce); writer.Write(_room); }
         private static string Write(Action<BinaryWriter> action)

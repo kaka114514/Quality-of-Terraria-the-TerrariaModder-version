@@ -56,8 +56,8 @@ namespace TerrariaModder.Core.Net {
   public static Action<int,string,string> OnStorageRequest;
   public static Action<bool,string,string> OnStorageResponse;
   public static string Request, Response, Operation;
-  public static void SendStorageRequest(string op, string payload) { Operation = op; Request = payload; }
-  public static void SendStorageResponseTo(int player, bool ok, string op, string payload) { Response = payload; }
+  public static void SendStorageRequest(string op, string payload) { string full; if(!QualityOfTerraria.Networking.NetSyncPayload.TryAcceptRequest(0,op,payload,out full)) return; Operation = op; Request = full; }
+  public static void SendStorageResponseTo(int player, bool ok, string op, string payload) { string full; if(!QualityOfTerraria.Networking.NetSyncPayload.TryAcceptResponse(op,payload,out full)) return; Response = full; }
  }
 }
 namespace QualityOfTerraria {
@@ -154,7 +154,9 @@ namespace QualityOfTerraria.UI {
 }
 '@
 $stubs = $stubs.Replace('__POLICY__',$policy).Replace('__LAYOUT__',$layout).Replace('__LAYOUTSTATE__',$layoutState).Replace('__VAULTLAYOUT__',$vaultLayout).Replace('__VAULTTOOLTIP__',$vaultTooltip).Replace('__SEARCH__',$search).Replace('__GRID__',$grid).Replace('__TOOLTIP__',$tooltip)
-Add-Type -TypeDefinition ('using TerrariaModder.Core.UI;' + (Get-Content (Join-Path $root 'UI/RemoteStorageSnapshots.cs') -Raw) + $storageTab + $stubs)
+$snapshots = [regex]::Replace((Get-Content (Join-Path $root 'UI/RemoteStorageSnapshots.cs') -Raw), '(?m)^using [^;]+;\s*', '')
+$transport = [regex]::Replace((Get-Content (Join-Path $root 'Networking/NetSyncPayload.cs') -Raw), '(?m)^using [^;]+;\s*', '')
+Add-Type -TypeDefinition ('using System;using System.Collections.Generic;using System.IO;using Terraria;using Terraria.ID;using TerrariaModder.Core.Net;using TerrariaModder.Core.UI;using QualityOfTerraria.Networking;' + $snapshots + $transport + $storageTab + $stubs)
 $count = [QualityOfTerraria.UI.StorageBehavior]::Run()
 "$count 项存储布局、搜索、会话和快照行为检查通过"
 

@@ -10,10 +10,11 @@ using Terraria;
 using TerrariaModder.Core.UI;
 namespace HarmonyLib { public class HarmonyPatch:Attribute {public HarmonyPatch(Type t,string n){}} }
 namespace Microsoft.Xna.Framework.Input { public enum ButtonState {Released,Pressed} public struct MouseState {public ButtonState LeftButton;} public static class Mouse {public static bool Pressed;public static MouseState GetState(){return new MouseState{LeftButton=Pressed?ButtonState.Pressed:ButtonState.Released};}} }
-namespace Terraria { public static class Main {public static bool gameMenu,dedServ,playerInventory,ingameOptionsWindow,mouseLeft,mouseLeftRelease;} }
+namespace Terraria { public class Player {public bool mouseInterface;} public static class Main {public static bool gameMenu,dedServ,playerInventory,ingameOptionsWindow,mouseLeft,mouseLeftRelease,blockMouse;public static Player LocalPlayer=new Player();} }
 namespace TerrariaModder.Core.UI {public static class ModMenu {public static bool IsVisible;}}
 namespace QualityOfTerraria {public static class Mod {public static bool WorldActive=true;}}
 namespace QualityOfTerraria.UI {
+ public static class UIManager {public static int Cleanups;public static void ClearClosedPanelBounds(){Cleanups++;}}
  public static class ExtremeStorageUI {public static bool IsOpen;}
  public static class SuperVaultUI {public static bool IsOpen;}
  public static class PlayerStatsUI {public static bool IsOpen;}
@@ -29,6 +30,7 @@ namespace QualityOfTerraria.Patches {
   static void Frame(bool down) {Mouse.Pressed=down;WorldUIClickPatch.Prefix();Main.mouseLeftRelease=false;WorldUIClickPatch.Postfix();}
   public static void Run(){
    Main.playerInventory=true;Frame(false);Frame(true);Check(Main.mouseLeft&&Main.mouseLeftRelease,"原版背包点击边沿恢复");
+   Check(UI.UIManager.Cleanups==2,"背包打开时每帧清理本模组关闭面板的残留边界");
    Frame(true);Check(!Main.mouseLeftRelease,"按住不产生重复点击");
    Frame(false);Main.playerInventory=false;Main.ingameOptionsWindow=true;Frame(true);Check(Main.mouseLeftRelease,"原版设置按钮恢复");
    Frame(false);Main.ingameOptionsWindow=false;ModMenu.IsVisible=true;Frame(true);Check(Main.mouseLeftRelease,"加载器设置不丢点击");

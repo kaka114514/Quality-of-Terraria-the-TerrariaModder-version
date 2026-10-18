@@ -18,6 +18,12 @@ namespace QualityOfTerraria.Networking
             internal string Guid, Nonce, LastRequest, LastResponse;
             internal long Sequence;
             internal int[] Liquids;
+            // 大面积框选的分帧铺设任务；完成后单独返回结果。
+            internal WandsAndTools.PlacementJob Job;
+            internal int JobSlot = -1;
+            internal long JobSequence;
+            internal bool JobNoConsume;
+            internal string JobToken;
         }
         private static readonly Dictionary<int, Peer> Peers = new Dictionary<int, Peer>();
         private static readonly Dictionary<string, int[]> WorldLiquidBalances = new Dictionary<string, int[]>();
@@ -82,6 +88,7 @@ namespace QualityOfTerraria.Networking
         {
             foreach (int client in new List<int>(Peers.Keys))
                 if (!SamePeer(client, Peers[client])) Peers.Remove(client);
+            if (Main.netMode == 2) StepPlacementJobs();
             if (!Busy || Main.netMode != 1) return;
             Player player = Main.LocalPlayer;
             player.mouseInterface = true;
@@ -90,7 +97,7 @@ namespace QualityOfTerraria.Networking
             if (_slot >= 0)
             {
                 _sent = Main.GameUpdateCount;
-                NetSync.SendStorageRequest(Operation, _payload);
+                NetSyncPayload.SendRequest(Operation, _payload);
                 Main.NewText("正在查询同一工具操作的材料结果；等待期间库存保持锁定", 255, 180, 100);
                 return;
             }
@@ -105,11 +112,8 @@ namespace QualityOfTerraria.Networking
         internal static void Request(string action, int slot = -1, params int[] values)
         {
             if (Main.netMode != 1 || !Mod.WorldActive || Busy) return;
-            if (slot >= 0 && (Main.LocalPlayer.itemAnimation > 0 || Terraria.GameContent.CraftingRequests.HasPendingRequests))
-            {
-                Main.NewText("请等待物品使用和原版合成确认完成后再使用建造工具", 255, 180, 100);
-                return;
-            }
+            // 建造请求由服务器按物品类型、前缀、数量和选中槽位核验；本地使用动画不能阻止
+            // 快速放置，因为手持方块拖拽本身会保持原版使用动画。
             if (RemoteStorageOperations.Busy)
             {
                 Main.NewText("正在等待服务器存储操作确认，请稍后使用工具", 255, 180, 100);
@@ -138,6 +142,7 @@ namespace QualityOfTerraria.Networking
             _type = item == null || item.IsAir ? 0 : item.type;
             _stack = item == null || item.IsAir ? 0 : item.stack;
             _prefix = item == null || item.IsAir ? (byte)0 : item.prefix;
+            System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
             using (var stream = new MemoryStream())
             using (var writer = new BinaryWriter(stream))
             {
@@ -157,8 +162,10 @@ namespace QualityOfTerraria.Networking
                     Main.LocalPlayer.inventory[58] = Main.mouseItem;
                     for (int i = 0; i < 59; i++) NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, Main.myPlayer, i);
                 }
-                NetSync.SendStorageRequest(Operation, _payload);
+                NetSyncPayload.SendRequest(Operation, _payload);
             }
+            // 联机卡顿诊断：请求本身在主线程完成日志写入与库存同步，超过一帧就记录一次。
+            if (clock.ElapsedMilliseconds >= 8) Mod.LogInfo($"[快速放置] 客户端请求准备耗时 {clock.ElapsedMilliseconds}ms（{action}）");
             if (action != "liquid") Main.NewText("正在等待服务器工具操作确认", 200, 220, 255);
         }
 
@@ -171,8 +178,10 @@ namespace QualityOfTerraria.Networking
         private static void ReceiveRequest(int client, string operation, string payload)
         {
             if (operation != Operation || !_initialized) return;
+            string complete;
+            if (!NetSyncPayload.TryAcceptRequest(client, operation, payload, out complete)) return;
             int generation = _generation;
-            NetworkRuntime.Enqueue(() => { if (_initialized && generation == _generation) HandleRequest(client, payload); });
+            NetworkRuntime.Enqueue(() => { if (_initialized && generation == _generation) HandleRequest(client, complete); });
         }
 
         private static void HandleRequest(int client, string payload)
@@ -223,14 +232,16 @@ namespace QualityOfTerraria.Networking
                         if (peer == null || nonce != peer.Nonce) throw new InvalidDataException("工具会话已过期，请重新使用");
                         if (sequence == peer.Sequence && peer.LastRequest == payload)
                         {
-                            NetSync.SendStorageResponseTo(client, true, Operation, RefreshResponseWorldFlags(peer.LastResponse));
+                            // 分帧铺设还在进行时不重复执行，也不提前返回结果。
+                            if (peer.LastResponse != null)
+                                NetSyncPayload.SendResponseTo(client, true, Operation, RefreshResponseWorldFlags(peer.LastResponse));
                             return;
                         }
                         if (sequence <= peer.Sequence) throw new InvalidDataException("工具请求重复或过期");
                         peer.Sequence = sequence;
                         remember = true;
                         if (player.dead) throw new InvalidDataException("玩家已死亡，工具操作未执行");
-                        if (action == "place" || action == "wall")
+                        if (action == "place")
                         {
                             var config = SettingsSync.GetPlayerConfig(client);
                             if (config == null) throw new InvalidDataException("正在等待个人设置交换确认，请稍后使用建造工具");
@@ -238,17 +249,21 @@ namespace QualityOfTerraria.Networking
                             if (slot < 0 || slot >= 50 || player.inventory[slot] == null) throw new InvalidDataException("未找到可用材料");
                             Item material = player.inventory[slot];
                             if (material.IsAir || material.type != type || (!noConsume && material.stack != stack) || material.prefix != prefix) throw new InvalidDataException("材料已改变，请等待库存同步后重试");
-                            if (action == "place")
+                            if (count != 4 || player.selectedItem != slot || (material.createTile < 0 && material.createWall <= 0)) throw new InvalidDataException("手持材料与请求不一致");
+                            CheckArea(values);
+                            if (WandsAndTools.PlacementTiles(values[0], values[1], values[2], values[3]) > WandsAndTools.SynchronousPlacementLimit)
                             {
-                                if (count != 4 || player.selectedItem != slot || (material.createTile < 0 && material.createWall <= 0)) throw new InvalidDataException("手持材料与请求不一致");
-                                CheckArea(values);
-                                message = "快速放置：服务器已铺设 " + WandsAndTools.ApplyDragPlacement(player, values[0], values[1], values[2], values[3]) + " 格";
+                                // 大范围铺设分帧执行：先记住请求，完成后按同一序号返回结果，客户端重发不会重复铺设。
+                                peer.Job = WandsAndTools.CreatePlacementJob(player, slot, material.createTile < 0, values[0], values[1], values[2], values[3], noConsume);
+                                peer.JobSlot = slot;
+                                peer.JobSequence = sequence;
+                                peer.JobNoConsume = noConsume;
+                                peer.JobToken = token;
+                                peer.LastRequest = payload;
+                                peer.LastResponse = null;
+                                return;
                             }
-                            else
-                            {
-                                if (count != 0 || material.createWall <= 0 || WandsAndTools.FindWallSlot(player) != slot) throw new InvalidDataException("背景墙材料与请求不一致");
-                                message = "快速铺墙：服务器已铺设 " + WandsAndTools.ApplyWallWand(player) + " 格";
-                            }
+                            message = "快速放置：服务器已铺设 " + WandsAndTools.ApplyDragPlacement(player, values[0], values[1], values[2], values[3]) + " 格";
                         }
                         else if (action == "liquid")
                         {
@@ -298,21 +313,57 @@ namespace QualityOfTerraria.Networking
                 }
             }
             catch (Exception error) { message = error.Message; }
-            if (peer != null && remember && slot >= 0)
+            string response = RecordAndBuildResponse(peer, remember, token, slot, player, ok, message, noConsume, requestSequence);
+            if (peer != null && remember) { peer.LastRequest = payload; peer.LastResponse = response; }
+            if (ok && slot >= 0 && !noConsume) NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, client, slot);
+            NetSyncPayload.SendResponseTo(client, ok, Operation, response);
+        }
+
+        // 服务端分帧完成大面积铺设；完成后按原请求序号返回与立即铺设一致的响应。
+        private static void StepPlacementJobs()
+        {
+            if (!Mod.WorldActive || Peers.Count == 0) return;
+            foreach (KeyValuePair<int, Peer> pair in new List<KeyValuePair<int, Peer>>(Peers))
+            {
+                Peer peer = pair.Value;
+                if (peer.Job == null) continue;
+                System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+                WandsAndTools.StepPlacementJob(peer.Job, WandsAndTools.PlacementChunksPerFrame);
+                // 服务端卡顿诊断：单帧铺设耗时，超过一帧就记录一次。
+                if (clock.ElapsedMilliseconds >= 8) Mod.LogInfo($"[快速放置] 服务器单帧铺设耗时 {clock.ElapsedMilliseconds}ms（已铺设 {peer.Job.Placed} 格）");
+                if (!peer.Job.Done) continue;
+                int placed = peer.Job.Placed;
+                peer.Job = null;
+                CompletePlacement(pair.Key, peer, placed);
+            }
+        }
+
+        private static void CompletePlacement(int client, Peer peer, int placed)
+        {
+            int slot = peer.JobSlot;
+            string message = "快速放置：服务器已铺设 " + placed + " 格";
+            string response = RecordAndBuildResponse(peer, true, peer.JobToken, slot, peer.Player, true, message, peer.JobNoConsume, peer.JobSequence);
+            peer.JobSlot = -1;
+            peer.JobToken = null;
+            peer.LastResponse = response;
+            if (slot >= 0 && !peer.JobNoConsume) NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, client, slot);
+            NetSyncPayload.SendResponseTo(client, true, Operation, response);
+        }
+
+        private static string RecordAndBuildResponse(Peer peer, bool record, string token, int slot, Player player, bool ok, string message, bool noConsume, long sequence)
+        {
+            if (peer != null && record && slot >= 0)
             {
                 using (var stream = new MemoryStream())
                 using (var writer = new BinaryWriter(stream))
                 {
                     // 日志valid表示库存结果已确定；动作失败也可能已部分消耗材料。
-                    writer.Write(peer.Nonce); writer.Write(requestSequence); writer.Write(true); writer.Write(message);
+                    writer.Write(peer.Nonce); writer.Write(sequence); writer.Write(true); writer.Write(message);
                     writer.Write(Convert.FromBase64String(InventoryState(player, false)));
-                    StorageTransactionJournal.RecordServer(peer.Guid, peer.Nonce + "." + requestSequence, Convert.ToBase64String(stream.ToArray()));
+                    StorageTransactionJournal.RecordServer(peer.Guid, peer.Nonce + "." + sequence, Convert.ToBase64String(stream.ToArray()));
                 }
             }
-            string response = BuildResponse(token, peer, slot, player, ok, message, noConsume);
-            if (peer != null && remember) { peer.LastRequest = payload; peer.LastResponse = response; }
-            if (ok && slot >= 0 && !noConsume) NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, client, slot);
-            NetSync.SendStorageResponseTo(client, ok, Operation, response);
+            return BuildResponse(token, peer, slot, player, ok, message, noConsume);
         }
 
         private static string InventoryState(Player player, bool client)
@@ -368,8 +419,10 @@ namespace QualityOfTerraria.Networking
         private static void ReceiveResponse(bool success, string operation, string payload)
         {
             if (operation != Operation || !_initialized) return;
+            string complete;
+            if (!NetSyncPayload.TryAcceptResponse(operation, payload, out complete)) return;
             int generation = _generation;
-            NetworkRuntime.Enqueue(() => { if (_initialized && generation == _generation) HandleResponse(payload); });
+            NetworkRuntime.Enqueue(() => { if (_initialized && generation == _generation) HandleResponse(complete); });
         }
 
         private static void HandleResponse(string payload)

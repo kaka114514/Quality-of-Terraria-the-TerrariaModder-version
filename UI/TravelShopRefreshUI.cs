@@ -11,6 +11,7 @@ namespace QualityOfTerraria.UI
     {
         internal const string PanelId = "QualityOfTerraria.TravelShopRefresh";
         private static int[] _lastShop;
+        internal static bool Visible => ShopOpen && Mod.Config?.RefreshTravelShop == true;
 
         private static bool ShopOpen => UIManager.CanRender && Main.instance != null && Main.playerInventory && Main.npcShop > 0 &&
             Main.npcShop < Main.instance.shop.Length && Main.LocalPlayer.talkNPC >= 0 && Main.LocalPlayer.talkNPC < Main.maxNPCs &&

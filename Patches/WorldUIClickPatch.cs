@@ -18,6 +18,15 @@ namespace QualityOfTerraria.Patches
             if (!_initialized) { _wasDown = down; _initialized = true; }
             _pressed = down && !_wasDown;
             _wasDown = down;
+
+            if (Main.playerInventory || Main.ingameOptionsWindow)
+            {
+                Player player = Main.LocalPlayer;
+                bool mouseInterface = player.mouseInterface, blockMouse = Main.blockMouse;
+                UI.UIManager.ClearClosedPanelBounds();
+                player.mouseInterface |= mouseInterface;
+                Main.blockMouse |= blockMouse;
+            }
         }
 
         public static void Postfix()

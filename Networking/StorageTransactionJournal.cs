@@ -14,7 +14,9 @@ namespace QualityOfTerraria.Networking
     {
         internal sealed class ClientRecord
         {
-            internal string World, Id, Before, Request;
+            internal string World, Id, Before, Request, After;
+            // 已收到并应用服务器确认，但角色存档还没落盘；此时不再锁库存，记录保留到保存成功再清除。
+            internal bool Confirmed;
         }
         private sealed class ServerRecords
         {
@@ -33,8 +35,14 @@ namespace QualityOfTerraria.Networking
         private static readonly Dictionary<string, ServerRecords> Worlds = new Dictionary<string, ServerRecords>();
         private static string _character, _path, _serverWorld, _characterPath;
         private static bool _canSave, _saving, _characterCloud;
+        // 角色整份保存（写入角色文件 + 读回校验 + 鼠标记录）是联机每次存取的主要卡顿来源，
+        // 短时间内连续操作合并成一次；事务记录保留到角色真正落盘后再清除。
+        private const int SaveCoalesceMs = 4000;
+        private const int SaveOpsLimit = 8;
+        private static int _lastSaveTick;
+        private static int _opsSinceSave;
         internal static ClientRecord Pending { get; private set; }
-        internal static bool ClientLocked => _character != null && (!_canSave || Pending != null);
+        internal static bool ClientLocked => _character != null && (!_canSave || (Pending != null && !Pending.Confirmed));
         internal static string Status { get; private set; } = "";
 
         internal static void InitializeClient(string characterIdentity)
@@ -44,17 +52,41 @@ namespace QualityOfTerraria.Networking
             _characterCloud = Main.ActivePlayerFileData?.IsCloudSave == true;
             if (string.IsNullOrEmpty(characterIdentity)) { Status = "无法确认角色身份，未发送物品操作"; return; }
             _path = Path.Combine(Main.SavePath, "TerrariaModder", "player-data", StoragePersistence.Identity(characterIdentity) + ".storage-transaction.dat");
-            _canSave = !File.Exists(_path) && !File.Exists(_path + ".bak");
+            _lastSaveTick = 0; _opsSinceSave = 0;
             ClientRecord loaded;
+            bool hasJournal = File.Exists(_path) || File.Exists(_path + ".bak");
             if (StoragePersistence.Read(_path, reader =>
             {
-                if (reader.ReadInt32() != 1) throw new InvalidDataException("事务日志版本不支持");
+                int version = reader.ReadInt32();
+                if (version != 1 && version != 2) throw new InvalidDataException("事务日志版本不支持");
                 if (!reader.ReadBoolean()) return null;
                 var record = new ClientRecord { World = reader.ReadString(), Id = reader.ReadString(), Before = reader.ReadString(), Request = reader.ReadString() };
+                if (version >= 2)
+                {
+                    record.Confirmed = reader.ReadBoolean();
+                    record.After = reader.ReadString();
+                }
                 Validate(record); return record;
-            }, out loaded)) { Pending = loaded; _canSave = true; }
-            if (!_canSave) { Status = "事务日志主文件与备份无法读取；库存保持锁定，请保留日志"; return; }
-            if (Pending != null) { Status = "有未确认的物品操作；返回原服务器等待恢复，未知结果不能自动取消"; return; }
+            }, out loaded)) Pending = loaded;
+            else if (hasJournal)
+            {
+                _canSave = false;
+                Status = "事务日志主文件和备份均无法读取；库存保持锁定";
+                Mod.LogError(Status, new InvalidDataException("事务日志记录损坏"));
+                return;
+            }
+            _canSave = true;
+            if (Pending != null)
+            {
+                if (Pending.Confirmed && !string.IsNullOrEmpty(Pending.After))
+                {
+                    try { ApplyInventorySnapshot(Pending.After); }
+                    catch (Exception error) { _canSave = false; Status = "已确认库存快照无法恢复；库存保持锁定"; Mod.LogError(Status, error); return; }
+                    Status = "已恢复上次确认的库存，等待角色存档落盘";
+                }
+                else Status = "有未确认的物品操作；返回原服务器等待恢复，未知结果不能自动取消";
+                return;
+            }
             string cursorPath = _path + ".cursor";
             if (!File.Exists(cursorPath) && !File.Exists(cursorPath + ".bak")) { Status = ""; return; }
             CursorRecord cursor;
@@ -87,18 +119,24 @@ namespace QualityOfTerraria.Networking
                 string.IsNullOrEmpty(record.Before) || record.Before.Length > 32768 || string.IsNullOrEmpty(record.Request) || record.Request.Length > 32768)
                 throw new InvalidDataException("未确认事务记录不合法");
             Convert.FromBase64String(record.Before); Convert.FromBase64String(record.Request);
+            if (record.Confirmed)
+            {
+                if (string.IsNullOrEmpty(record.After) || record.After.Length > 32768) throw new InvalidDataException("已确认库存快照不合法");
+                Convert.FromBase64String(record.After);
+            }
         }
 
         internal static bool BeginClient(string world, string id, string beforeBase64, string requestBase64)
         {
-            if (!_canSave || _path == null || Pending != null) { Status = "事务日志尚未恢复，不能开始新的物品操作"; return false; }
+            if (!_canSave || _path == null || (Pending != null && !Pending.Confirmed)) { Status = "事务日志尚未恢复，不能开始新的物品操作"; return false; }
             try
             {
                 var record = new ClientRecord { World = world, Id = id, Before = beforeBase64, Request = requestBase64 };
                 Validate(record);
-                StoragePersistence.Write(_path, writer =>
+                StoragePersistence.WriteInPlace(_path, writer =>
                 {
-                    writer.Write(1); writer.Write(true); writer.Write(record.World); writer.Write(record.Id); writer.Write(record.Before); writer.Write(record.Request);
+                    writer.Write(2); writer.Write(true); writer.Write(record.World); writer.Write(record.Id); writer.Write(record.Before); writer.Write(record.Request);
+                    writer.Write(false); writer.Write("");
                 });
                 Pending = record; Status = "物品操作已记录，等待服务器确认"; return true;
             }
@@ -137,9 +175,100 @@ namespace QualityOfTerraria.Networking
             });
         }
 
+        private static string EncodeInventorySnapshot(Item[] inventory, Item cursor)
+        {
+            if (inventory == null || inventory.Length < 59) throw new InvalidDataException("角色库存槽位不足");
+            using (var stream = new MemoryStream())
+            using (var writer = new BinaryWriter(stream))
+            {
+                writer.Write(59);
+                for (int i = 0; i < 58; i++) WriteItem(writer, inventory[i]);
+                WriteItem(writer, cursor);
+                return Convert.ToBase64String(stream.ToArray());
+            }
+        }
+
+        private static void WriteItem(BinaryWriter writer, Item item)
+        {
+            bool empty = item == null || item.IsAir;
+            writer.Write(empty ? 0 : item.type);
+            writer.Write(empty ? 0 : item.stack);
+            writer.Write(empty ? (byte)0 : item.prefix);
+            writer.Write(!empty && item.favorited);
+        }
+
+        private static void ApplyInventorySnapshot(string encoded)
+        {
+            using (var reader = new BinaryReader(new MemoryStream(Convert.FromBase64String(encoded))))
+            {
+                int count = reader.ReadInt32();
+                if (count != 59) throw new InvalidDataException("库存快照槽位数不合法");
+                for (int i = 0; i < 59; i++)
+                {
+                    int type = reader.ReadInt32(), stack = reader.ReadInt32();
+                    byte prefix = reader.ReadByte(); bool favorite = reader.ReadBoolean();
+                    if (type < 0 || type >= ItemID.Count || stack < 0 || stack > 1000000 || (type == 0) != (stack == 0))
+                        throw new InvalidDataException("库存快照物品不合法");
+                    var item = new Item();
+                    if (type > 0) { item.SetDefaults(type); item.Prefix(prefix); item.stack = stack; item.favorited = favorite; }
+                    if (i == 58) Main.mouseItem = item;
+                    else Main.LocalPlayer.inventory[i] = item;
+                }
+                if (reader.BaseStream.Position != reader.BaseStream.Length) throw new InvalidDataException("库存快照包含多余数据");
+                Main.LocalPlayer.inventory[58] = Main.mouseItem;
+            }
+        }
+
+        private static void WriteConfirmedRecord()
+        {
+            StoragePersistence.WriteInPlace(_path, writer =>
+            {
+                writer.Write(2); writer.Write(true); writer.Write(Pending.World); writer.Write(Pending.Id);
+                writer.Write(Pending.Before); writer.Write(Pending.Request); writer.Write(Pending.Confirmed); writer.Write(Pending.After ?? "");
+            });
+        }
+
+        private static bool CompleteWithoutSave(Item[] inventory, Item cursor)
+        {
+            try
+            {
+                Pending.After = EncodeInventorySnapshot(inventory, cursor);
+                Pending.Confirmed = true;
+                WriteConfirmedRecord();
+                Status = "操作已确认；等待角色存档合并保存";
+                return true;
+            }
+            catch (Exception error)
+            {
+                // 确认记录没有完整写入时不能把库存解锁；否则下一次操作可能覆盖未知结果。
+                Pending.Confirmed = false;
+                Pending.After = null;
+                _canSave = false;
+                Status = "确认库存快照保存失败；保留库存锁";
+                Mod.LogError(Status, error);
+                return false;
+            }
+        }
+
+        // 终极存储使用此快速确认路径，避免点击响应中同步调用原版整份角色保存。
+        internal static bool CompleteClient(Item[] inventory, Item cursor)
+        {
+            if (!_canSave || Pending == null) return false;
+            return CompleteWithoutSave(inventory, cursor);
+        }
+
         internal static bool CompleteClient()
         {
             if (!_canSave || Pending == null) return false;
+            // 距上次落盘不足 1.5 秒且连续操作不超过 8 次时合并保存：记录保持到真正保存后再清除，
+            // 期间不锁库存；崩溃恢复仍按原有流程向服务器核对结果。
+            bool defer = _lastSaveTick != 0 && _opsSinceSave < SaveOpsLimit &&
+                unchecked((uint)(Environment.TickCount - _lastSaveTick)) < SaveCoalesceMs;
+            if (defer)
+            {
+                _opsSinceSave++;
+                return CompleteWithoutSave(Main.LocalPlayer.inventory, Main.mouseItem);
+            }
             try
             {
                 _saving = true;
@@ -148,9 +277,9 @@ namespace QualityOfTerraria.Networking
                     throw new InvalidDataException("当前角色不能持久保存");
                 Player.SavePlayer(file, false, false);
                 SaveCursor(file);
-                // 完成标记也原子写入；不要先删除文件，让旧备份在下次启动时复活。
-                StoragePersistence.Write(_path, writer => { writer.Write(1); writer.Write(false); });
-                Pending = null; Status = "确认库存和鼠标物品已保存"; return true;
+                StoragePersistence.WriteInPlace(_path, writer => { writer.Write(2); writer.Write(false); });
+                Pending = null; _lastSaveTick = Environment.TickCount; _opsSinceSave = 0;
+                Status = "确认库存和鼠标物品已保存"; return true;
             }
             catch (Exception error) { Status = "确认库存尚未可靠保存；保留事务日志和库存锁"; Mod.LogError(Status, error); return false; }
             finally { _saving = false; }
@@ -163,8 +292,21 @@ namespace QualityOfTerraria.Networking
                 => Main.netMode == 2 || !MatchesCharacter(__0) || _saving || !ClientLocked;
             public static void Postfix(PlayerFileData __0)
             {
-                if (_saving || _path == null || !_canSave || Pending != null || Main.netMode == 2 || !MatchesCharacter(__0)) return;
-                try { SaveCursor(__0); }
+                if (_saving || _path == null || !_canSave || Main.netMode == 2 || !MatchesCharacter(__0)) return;
+                try
+                {
+                    if (Pending != null)
+                    {
+                        // 未确认的等待恢复流程；已确认的说明本次原版保存已经把结果落盘，可以清除事务记录。
+                        if (!Pending.Confirmed) return;
+                        SaveCursor(__0);
+                        StoragePersistence.WriteInPlace(_path, writer => { writer.Write(2); writer.Write(false); });
+                        Pending = null; _lastSaveTick = Environment.TickCount; _opsSinceSave = 0;
+                        Status = "确认库存和鼠标物品已保存";
+                        return;
+                    }
+                    SaveCursor(__0);
+                }
                 catch (Exception error) { _canSave = false; Status = "角色与鼠标物品未能共同保存；保留记录并锁定库存"; Mod.LogError(Status, error); }
             }
         }

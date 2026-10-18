@@ -24,10 +24,11 @@ namespace QualityOfTerraria.Networking {
     public static class FeatureNetwork { public static void Initialize() {} public static void ResetSession() {} }
     public static class VeinMiningNetwork { public static void Initialize() {} public static void ResetSession() {} }
     public static class NetworkRuntime { public static void ResetSession() {} }
+    public static class NetSyncPayload { public static void Reset() {} }
     public static class LocalWorldSettings { public static void Restore() {} }
     public static class StorageTransactionJournal { public static void EndServerSession() {} }
 }
-namespace QualityOfTerraria.Features { public static class VeinMiningSystem { public static bool Suspended; public static void ResetSession() {} } public static class ToolSpeedSystem { public static void ResetSession() {} } }
+namespace QualityOfTerraria.Features { public static class VeinMiningSystem { public static bool Suspended; public static void ResetSession() {} } public static class ToolSpeedSystem { public static void ResetSession() {} } public static class StructureLocator {public static void ResetSession(){}} public static class TargetDummySystem {public static void ResetSession(){}} }
 namespace QualityOfTerraria.Patches { public static class StorageInventoryGuard { public static void ResetSession() {} } public static class WorldUIClickPatch { public static void ResetSession() {} } public static class VanillaUIInputDiagnostics { public static void ResetSession() {} } }
 namespace QualityOfTerraria {
     public class Logger { public void Info(string text) {} }
@@ -40,7 +41,7 @@ namespace QualityOfTerraria {
     public static class EventLog { public static string Value = ""; }
 }
 namespace QualityOfTerraria.UI {
-    public static class RemoteStorageSnapshots { public static void Initialize() {} }
+    public static class RemoteStorageSnapshots { public static void Initialize() {} public static void ResetSession() {} }
     public static class UIManager { public static void ResetSession() { EventLog.Value += "reset,"; } }
     public static class SuperVaultUI {
         public static void EnsureLoadedForCurrentPlayer() { EventLog.Value += "vault-load,"; }
@@ -52,7 +53,7 @@ namespace QualityOfTerraria.UI {
     }
 }
 '@
-Add-Type -TypeDefinition $harness.Replace('__METHODS__', ($methods -join "`n"))
+Add-Type -TypeDefinition ("#define QOT_SERVER`n" + $harness.Replace('__METHODS__', ($methods -join "`n")))
 function Check($condition, $label) {
     if (!$condition) { throw "$label 实际：$([QualityOfTerraria.EventLog]::Value)" }
     Write-Host "PASS $label"

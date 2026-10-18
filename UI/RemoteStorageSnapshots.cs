@@ -23,6 +23,7 @@ namespace QualityOfTerraria.UI
         private static Action<int, string, string> _onRequest;
         private static Action<bool, string, string> _onResponse;
         internal static string Status { get; private set; } = "远程箱子快照尚未确认";
+        internal static bool RefreshPending => _pending || _queue.Count > 0;
 
         internal static void Initialize()
         {
@@ -102,7 +103,7 @@ namespace QualityOfTerraria.UI
                 _pending = true;
                 _requestFrame = Main.GameUpdateCount;
                 Status = "正在等待服务器箱子快照";
-                NetSync.SendStorageRequest(Operation, Convert.ToBase64String(stream.ToArray()));
+                NetSyncPayload.SendRequest(Operation, Convert.ToBase64String(stream.ToArray()));
             }
         }
 
@@ -111,8 +112,11 @@ namespace QualityOfTerraria.UI
             if (operation != Operation || Main.netMode != 2 || client < 0 || client >= Main.maxPlayers || !Main.player[client].active) return;
             try
             {
-                if (payload.Length > 1024) throw new InvalidDataException("快照请求过大");
-                using (var input = new BinaryReader(new MemoryStream(Convert.FromBase64String(payload))))
+                if (payload == null || payload.Length > 1024) throw new InvalidDataException("快照请求过大");
+                string complete;
+                if (!NetSyncPayload.TryAcceptRequest(client, operation, payload, out complete)) return;
+                if (complete.Length > 1024) throw new InvalidDataException("快照请求过大");
+                using (var input = new BinaryReader(new MemoryStream(Convert.FromBase64String(complete))))
                 using (var stream = new MemoryStream())
                 using (var writer = new BinaryWriter(stream))
                 {
@@ -141,7 +145,7 @@ namespace QualityOfTerraria.UI
                             writer.Write(empty ? (byte)0 : item.prefix);
                         }
                     }
-                    NetSync.SendStorageResponseTo(client, true, Operation, Convert.ToBase64String(stream.ToArray()));
+                    NetSyncPayload.SendResponseTo(client, true, Operation, Convert.ToBase64String(stream.ToArray()));
                 }
             }
             catch (Exception error) { Mod.LogError("获取服务器箱子快照失败", error); }
@@ -152,8 +156,11 @@ namespace QualityOfTerraria.UI
             if (operation != Operation || Main.netMode != 1 || !_pending) return;
             try
             {
-                if (!success || payload.Length > 32768) throw new InvalidDataException("服务器快照不可用");
-                using (var reader = new BinaryReader(new MemoryStream(Convert.FromBase64String(payload))))
+                if (!success || payload == null || payload.Length > 32768) throw new InvalidDataException("服务器快照不可用");
+                string complete;
+                if (!NetSyncPayload.TryAcceptResponse(operation, payload, out complete)) return;
+                if (complete.Length > 32768) throw new InvalidDataException("服务器快照不可用");
+                using (var reader = new BinaryReader(new MemoryStream(Convert.FromBase64String(complete))))
                 {
                     if (reader.ReadString() != _pendingToken) return;
                     int count = reader.ReadInt32();
@@ -191,7 +198,6 @@ namespace QualityOfTerraria.UI
                 _pending = false;
                 Status = "远程快照已确认；实际合成仍由服务器核验";
                 ExtremeStorageUI.RefreshItems();
-                Recipe.UpdateRecipeList();
             }
             catch (Exception error)
             {
@@ -208,6 +214,18 @@ namespace QualityOfTerraria.UI
             _pending = false;
             _pendingToken = null;
             _queue.Clear();
+            _refreshFrame = 0;
+        }
+
+        // 物品操作只改变了服务器箱子内容，保留旧快照直到新快照到达，
+        // 避免响应处理期间面板瞬间变成空白并把旧槽位误当成不存在。
+        internal static void RefreshAfterMutation()
+        {
+            if (!_initialized) return;
+            _pending = false;
+            _pendingToken = null;
+            _queue.Clear();
+            foreach (long key in ExtremeStorageUI.GetMarkedCoordinates()) _queue.Enqueue(key);
             _refreshFrame = 0;
         }
     }

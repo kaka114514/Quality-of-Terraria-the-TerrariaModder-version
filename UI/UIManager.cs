@@ -57,6 +57,16 @@ namespace QualityOfTerraria.UI
             PreserveVanillaInput(UpdatePanels);
         }
 
+        internal static void ClearClosedPanelBounds()
+        {
+            if (!ExtremeStorageUI.IsOpen) UIRenderer.UnregisterPanelBounds(ExtremeStorageUI.PanelId);
+            if (!SuperVaultUI.IsOpen) UIRenderer.UnregisterPanelBounds(SuperVaultUI.PanelId);
+            if (!PlayerStatsUI.IsOpen) UIRenderer.UnregisterPanelBounds(PlayerStatsUI.PanelId);
+            if (!BuffAndSpawnRateUI.IsOpen) UIRenderer.UnregisterPanelBounds(BuffAndSpawnRateUI.PanelId);
+            if (!StructureLocatorUI.IsOpen) UIRenderer.UnregisterPanelBounds(StructureLocatorUI.PanelId);
+            if (!TravelShopRefreshUI.Visible) UIRenderer.UnregisterPanelBounds(TravelShopRefreshUI.PanelId);
+        }
+
         private static void UpdatePanels()
         {
             ExtremeStorageUI.Update();
@@ -65,6 +75,7 @@ namespace QualityOfTerraria.UI
             BuffAndSpawnRateUI.Update();
             StructureLocatorUI.Update();
             TravelShopRefreshUI.Update();
+            StructureMapMarker.EnsureRegistered();
             StructureLocator.Update();
             WandsAndTools.UpdateQuickPlace();
             WandsAndTools.UpdateLiquidWand();

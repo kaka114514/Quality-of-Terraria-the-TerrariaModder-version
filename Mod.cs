@@ -20,9 +20,24 @@ namespace QualityOfTerraria
         private ILogger _logger;
         private bool _serverSession;
         private bool _contentReady, _patchesApplied;
+#if !QOT_SERVER
+        private IMod _serverRuntime;
+#endif
+#if QOT_SERVER
+        private const string HarmonyId = "QualityOfTerraria.Server";
+#else
+        private const string HarmonyId = "QualityOfTerraria";
+#endif
 
         public override void Initialize(ModContext context)
         {
+#if !QOT_SERVER
+            if (context.IsServer)
+            {
+                _serverRuntime = ServerRuntime.Load(context);
+                return;
+            }
+#endif
             _logger = context.Logger;
             _instance = this;
             _context = context;
@@ -40,7 +55,6 @@ namespace QualityOfTerraria
             context.RegisterKeybind("super-vault", "随身大背包", "呼出100格额外随身独立仓库", "B", UI.SuperVaultUI.Toggle);
 
             // 工具与辅助功能
-            context.RegisterKeybind("wall-wand", "快速铺墙", "使用背包中的背景墙，快速铺满周围无墙区域", "O", WandsAndTools.ExecuteWallWand);
             context.RegisterKeybind("weather-control", "切换晴雨", "切换下雨和放晴", "U", WandsAndTools.ExecuteWeatherController);
 
             // 大型 UI 界面与特色系统快捷键（已完全避开 F6~F12）
@@ -54,7 +68,7 @@ namespace QualityOfTerraria
             context.RegisterKeybind("toggle-speed-boost", "切换工具加速", "切换挖掘、砍伐和放置加速，不改变各自速度设置", "Backslash", Features.ToolSpeedSystem.Toggle);
             context.RegisterKeybind("force-vein-mine", "强制连锁挖矿（按住）", "按住此键挖矿，临时启用连锁；松开恢复原开关", "LeftShift", null);
 
-            UI.UIManager.Initialize();
+            if (!context.IsServer) UI.UIManager.Initialize();
             FrameEvents.OnPreUpdate += CheckWorldSession;
             FrameEvents.OnPreUpdate += UpdateNetworkSession;
             GameEvents.OnWorldSave += SaveSession;
@@ -67,9 +81,10 @@ namespace QualityOfTerraria
             if (!_contentReady || _patchesApplied) return;
             _patchesApplied = true;
             int patchedCount = 0;
-            var harmony = new HarmonyLib.Harmony("QualityOfTerraria");
+            var harmony = new HarmonyLib.Harmony(HarmonyId);
             foreach (var type in typeof(Mod).Assembly.GetTypes())
             {
+                // 矿石来源补丁在两种运行模块里都安装，由 Main.netMode==2 自行判断是否生效。
                 var attrs = type.GetCustomAttributes(typeof(HarmonyLib.HarmonyPatch), false);
                 if (attrs != null && attrs.Length > 0)
                 {
@@ -94,6 +109,9 @@ namespace QualityOfTerraria
 
         public void OnContentReady(ModContext context)
         {
+#if !QOT_SERVER
+            if (_serverRuntime != null) { ((IModLifecycle)_serverRuntime).OnContentReady(context); return; }
+#endif
             VeinMinerLegacyLoaded = context.IsModLoaded("vein-miner");
             Features.VeinMiningSystem.Suspended = VeinMinerLegacyLoaded;
             if (VeinMinerLegacyLoaded) _logger?.Warn("独立vein-miner仍在加载，更好的体验暂停重复连锁与速度功能；请只保留其中一个。");
@@ -104,7 +122,11 @@ namespace QualityOfTerraria
 
         public void OnWorldLoad()
         {
-            UI.UIManager.ResetSession();
+#if !QOT_SERVER
+            if (_serverRuntime != null) { ((IModLifecycle)_serverRuntime).OnWorldLoad(); return; }
+#endif
+            if (!Main.dedServ) UI.UIManager.ResetSession();
+            else UI.RemoteStorageSnapshots.ResetSession();
             WorldActive = true;
             _serverSession = Main.netMode == 2;
             if (Main.netMode == 0) LocalWorldSettings.Restore();
@@ -115,30 +137,39 @@ namespace QualityOfTerraria
             VeinMiningNetwork.Initialize();
             Features.VeinMiningSystem.Suspended = VeinMinerLegacyLoaded;
             UI.RemoteStorageSnapshots.Initialize();
-            UI.SuperVaultUI.EnsureLoadedForCurrentPlayer();
-            UI.ExtremeStorageUI.EnsureLoadedForCurrentWorld();
-            _logger?.Info("QualityOfTerraria: 世界已加载，已按存档身份尝试读取大背包与箱子标记。");
+            if (!Main.dedServ)
+            {
+                UI.SuperVaultUI.EnsureLoadedForCurrentPlayer();
+                UI.ExtremeStorageUI.EnsureLoadedForCurrentWorld();
+            }
+            _logger?.Info("QualityOfTerraria: 世界已加载，网络会话已启动。");
         }
 
         public void OnWorldUnload()
         {
+#if !QOT_SERVER
+            if (_serverRuntime != null) { ((IModLifecycle)_serverRuntime).OnWorldUnload(); return; }
+#endif
             EndSession();
         }
 
         public override void Unload()
         {
+#if !QOT_SERVER
+            if (_serverRuntime != null) { _serverRuntime.Unload(); _serverRuntime = null; return; }
+#endif
             EndSession();
             FrameEvents.OnPreUpdate -= CheckWorldSession;
             FrameEvents.OnPreUpdate -= UpdateNetworkSession;
             GameEvents.OnWorldSave -= SaveSession;
             GameEvents.OnReturnToMenu -= EndSession;
-            UI.UIManager.Unload();
+            if (_context?.IsServer != true) UI.UIManager.Unload();
             RemoteStorageOperations.Unload();
             SettingsSync.Unload();
             ToolNetwork.Unload();
             FeatureNetwork.Unload();
             VeinMiningNetwork.Unload();
-            new HarmonyLib.Harmony("QualityOfTerraria").UnpatchAll("QualityOfTerraria");
+            new HarmonyLib.Harmony(HarmonyId).UnpatchAll(HarmonyId);
             _contentReady = _patchesApplied = false;
             _context = null;
             _instance = null;
@@ -152,6 +183,9 @@ namespace QualityOfTerraria
 
         public void OnConfigChanged()
         {
+#if !QOT_SERVER
+            if (_serverRuntime != null) return;
+#endif
             if (Config == null || Main.netMode != 0) return;
             string error;
             if (!LocalWorldSettings.Save(out error))
@@ -163,7 +197,7 @@ namespace QualityOfTerraria
 
         private void SaveSession()
         {
-            if (!WorldActive) return;
+            if (!WorldActive || Main.dedServ) return;
             UI.SuperVaultUI.SaveVaultData();
             UI.ExtremeStorageUI.SaveMarkedChests();
         }
@@ -172,7 +206,13 @@ namespace QualityOfTerraria
         {
             SaveSession();
             WorldActive = false;
-            UI.UIManager.ResetSession();
+            if (!Main.dedServ) UI.UIManager.ResetSession();
+            else
+            {
+                UI.RemoteStorageSnapshots.ResetSession();
+                Features.StructureLocator.ResetSession();
+                Features.TargetDummySystem.ResetSession();
+            }
             if (_serverSession) StorageTransactionJournal.EndServerSession();
             _serverSession = false;
             RemoteStorageOperations.ResetSession();
@@ -185,6 +225,7 @@ namespace QualityOfTerraria
             Patches.StorageInventoryGuard.ResetSession();
             Patches.WorldUIClickPatch.ResetSession();
             Patches.VanillaUIInputDiagnostics.ResetSession();
+            NetSyncPayload.Reset();
             NetworkRuntime.ResetSession();
         }
 
@@ -192,6 +233,7 @@ namespace QualityOfTerraria
         {
             if (!WorldActive) return;
             NetworkRuntime.Update();
+            WandsAndTools.UpdatePlacementJobs();
             RemoteStorageOperations.Update();
             SettingsSync.Update();
             ToolNetwork.Update();
@@ -199,8 +241,28 @@ namespace QualityOfTerraria
             VeinMiningNetwork.Update();
             Features.VeinMiningSystem.IsForced = IsForceVeinMiningHeld();
             Features.VeinMiningSystem.Update();
+            if (Main.dedServ)
+            {
+                Features.StructureLocator.Update();
+                Features.TargetDummySystem.Update();
+            }
             Patches.StorageInventoryGuard.Update();
         }
+
+#if QOT_SERVER
+        internal static void UpdateServerSession()
+        {
+            if (_instance == null || Main.netMode != 2) return;
+            if (WorldGen.isGeneratingOrLoadingWorld || Main.ActiveWorldFileData == null)
+            {
+                if (WorldActive) _instance.EndSession();
+                return;
+            }
+            if (!WorldActive) _instance.OnWorldLoad();
+            // 专服模式下 Core 0.4.1 跳过 FrameEvents；网络回调必须在这里排空。
+            _instance.UpdateNetworkSession();
+        }
+#endif
 
         internal static bool IsForceVeinMiningHeld()
         {

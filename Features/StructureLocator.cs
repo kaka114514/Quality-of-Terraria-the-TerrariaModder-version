@@ -22,6 +22,9 @@ namespace QualityOfTerraria.Features
         private const int TilesPerFrame = 8192;
         private static Action<Point?> _complete;
         private static bool _remotePending;
+        private static readonly Dictionary<StructureType, Point> _lastFound = new Dictionary<StructureType, Point>();
+        private static readonly Dictionary<StructureType, Point> _markers = new Dictionary<StructureType, Point>();
+        private static readonly List<KeyValuePair<StructureType, Point>> _markerSnapshot = new List<KeyValuePair<StructureType, Point>>();
 
         public static string GetStructureName(StructureType type)
         {
@@ -54,13 +57,13 @@ namespace QualityOfTerraria.Features
 
         internal static void StartScan(StructureType type, Vector2 origin, Action<Point?> complete)
         {
-            ResetSession();
+            ResetScanState();
             _complete = complete;
             _type = type;
             _origin = origin;
             _width = Main.maxTilesX;
             _height = Main.maxTilesY;
-            Point? direct = FindKnownPosition(type);
+            Point? direct = _lastFound.ContainsKey(type) ? null : FindKnownPosition(type);
             if (direct.HasValue) { Finish(direct); return; }
             IsScanning = true;
             if (Main.netMode != 2) Main.NewText($"【结构定位】正在扫描 {GetStructureName(type)}…", 100, 240, 255);
@@ -80,6 +83,7 @@ namespace QualityOfTerraria.Features
                 if (Matches(_type, Main.tile[x, y]))
                 {
                     Point pos = new Point(x, y);
+                    if (_lastFound.TryGetValue(_type, out Point previous) && (long)x * _height + y <= (long)previous.X * _height + previous.Y) continue;
                     if (_type != StructureType.PlanteraBulb && _type != StructureType.BeeHive) { Finish(pos); return; }
                     float distance = Vector2.DistanceSquared(_origin, new Vector2(x * 16, y * 16));
                     if (distance < _closestDistance) { _closestDistance = distance; _closest = pos; }
@@ -92,6 +96,14 @@ namespace QualityOfTerraria.Features
 
         public static void ResetSession()
         {
+            ResetScanState();
+            _lastFound.Clear();
+            _markers.Clear();
+            _markerSnapshot.Clear();
+        }
+
+        private static void ResetScanState()
+        {
             IsScanning = false;
             ScanProgress = 0f;
             _nextTile = 0;
@@ -103,13 +115,13 @@ namespace QualityOfTerraria.Features
 
         internal static void AwaitServer()
         {
-            ResetSession();
+            ResetScanState();
             _remotePending = IsScanning = true;
         }
 
         internal static void ReceiveServerResult(StructureType type, Point? target)
         {
-            ResetSession();
+            ResetScanState();
             _type = type;
             _origin = Main.LocalPlayer.Center;
             _width = Main.maxTilesX;
@@ -174,10 +186,13 @@ namespace QualityOfTerraria.Features
             if (!target.HasValue)
             {
                 string scope = "当前世界";
-                Main.NewText($"【结构定位】未能在{scope}中找到 {GetStructureName(_type)}！", 255, 120, 120);
+                Main.NewText(_lastFound.ContainsKey(_type) ? $"【结构定位】{GetStructureName(_type)}已没有更多结果。" : $"【结构定位】未能在{scope}中找到 {GetStructureName(_type)}！", 255, 120, 120);
                 return;
             }
             Point pos = target.Value;
+            _lastFound[_type] = pos;
+            _markers[_type] = pos;
+            RefreshMarkerSnapshot();
             if (Main.Map != null)
             {
                 for (int x = Math.Max(0, pos.X - 25); x <= Math.Min(_width - 1, pos.X + 25); x++)
@@ -187,6 +202,22 @@ namespace QualityOfTerraria.Features
             int distance = (int)(Vector2.Distance(_origin, new Vector2(pos.X * 16, pos.Y * 16)) / 16f);
             Main.NewText($"【结构定位】已找到 {GetStructureName(_type)}！坐标 [X={pos.X}, Y={pos.Y}]，距离约 {distance} 格，已点亮小地图。", 100, 240, 255);
             SoundEngine.PlaySound(SoundID.Item29);
+        }
+
+        // 地图标记由 Features.StructureMapMarker 用原版地图层绘制；这里只维护当前会话的标记数据。
+        internal static IReadOnlyList<KeyValuePair<StructureType, Point>> Markers => _markerSnapshot;
+
+        // 地图上右键取消某个标记；只移除显示，不改变"继续找下一个"的搜索位置。
+        internal static void RemoveMarker(StructureType type)
+        {
+            if (!_markers.Remove(type)) return;
+            RefreshMarkerSnapshot();
+        }
+
+        private static void RefreshMarkerSnapshot()
+        {
+            _markerSnapshot.Clear();
+            foreach (KeyValuePair<StructureType, Point> marker in _markers) _markerSnapshot.Add(marker);
         }
     }
 }

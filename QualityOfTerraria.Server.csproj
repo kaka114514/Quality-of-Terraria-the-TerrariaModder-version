@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>QualityOfTerraria.Server</AssemblyName>
+    <RootNamespace>QualityOfTerraria</RootNamespace>
+    <OutputType>Library</OutputType>
+    <LangVersion>latest</LangVersion>
+    <DefineConstants>$(DefineConstants);QOT_SERVER</DefineConstants>
+    <OutputPath>bin\Server\</OutputPath>
+    <IntermediateOutputPath>obj\Server\$(Configuration)\</IntermediateOutputPath>
+    <AssemblySearchPaths>{HintPathFromItem};$(AssemblySearchPaths)</AssemblySearchPaths>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <NuGetAudit>false</NuGetAudit>
+    <NoWarn>$(NoWarn);CS0436</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="QualityOfTerrariaConfig.cs;obj\**;bin\**;github_push\**" />
+    <EmbeddedResource Remove="github_push\**" />
+    <None Remove="github_push\**" />
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" />
+    <Reference Include="QualityOfTerraria"><HintPath>bin\Release\QualityOfTerraria.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="TerrariaServer"><HintPath>D:\App\Game\Steam\steamapps\common\Terraria\TerrariaServer.exe</HintPath><Private>false</Private></Reference>
+    <Reference Include="TerrariaModder.Core"><HintPath>D:\App\Game\Steam\steamapps\common\Terraria\TerrariaModder\core\TerrariaModder.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="0Harmony"><HintPath>D:\App\Game\Steam\steamapps\common\Terraria\TerrariaModder\core\deps\0Harmony.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Microsoft.Xna.Framework"><HintPath>C:\Windows\Microsoft.NET\assembly\GAC_32\Microsoft.Xna.Framework\v4.0_4.0.0.0__842cf8be1de50553\Microsoft.Xna.Framework.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Microsoft.Xna.Framework.Game"><HintPath>C:\Windows\Microsoft.NET\assembly\GAC_32\Microsoft.Xna.Framework.Game\v4.0_4.0.0.0__842cf8be1de50553\Microsoft.Xna.Framework.Game.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Microsoft.Xna.Framework.Graphics"><HintPath>C:\Windows\Microsoft.NET\assembly\GAC_32\Microsoft.Xna.Framework.Graphics\v4.0_4.0.0.0__842cf8be1de50553\Microsoft.Xna.Framework.Graphics.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="ReLogic"><HintPath>lib\ReLogic.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

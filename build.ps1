@@ -8,6 +8,7 @@ Write-Host "==========================================" -ForegroundColor Cyan
 $projectDir = $PSScriptRoot
 $targetModDir = "D:\App\Game\Steam\steamapps\common\Terraria\TerrariaModder\mods\quality-of-terraria"
 $targetDll = Join-Path $targetModDir "QualityOfTerraria.dll"
+$targetServer = Join-Path $targetModDir "QualityOfTerraria.Server.bin"
 
 # 1. 寻找带有 SDK 的 dotnet.exe 路径
 $dotnetCmd = "dotnet"
@@ -23,8 +24,19 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $outputDll = Join-Path $projectDir "bin\Release\QualityOfTerraria.dll"
+$outputServer = Join-Path $projectDir "bin\Release\QualityOfTerraria.Server.bin"
+& (Join-Path $projectDir 'build-server.ps1')
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "❌ 专用服务器模块编译失败！" -ForegroundColor Red
+    exit 1
+}
 if (!(Test-Path $outputDll)) {
     Write-Host "❌ 未找到编译输出文件: $outputDll" -ForegroundColor Red
+    exit 1
+}
+
+if (!(Test-Path $outputServer)) {
+    Write-Host "❌ 未找到专用服务器模块: $outputServer" -ForegroundColor Red
     exit 1
 }
 
@@ -36,7 +48,11 @@ if (!(Test-Path $targetModDir)) {
 if (Test-Path -LiteralPath $targetDll) {
     Copy-Item -LiteralPath $targetDll -Destination ($targetDll + '.bak') -Force
 }
+if (Test-Path -LiteralPath $targetServer) {
+    Copy-Item -LiteralPath $targetServer -Destination ($targetServer + '.bak') -Force
+}
 Copy-Item -LiteralPath $outputDll -Destination $targetDll -Force
+Copy-Item -LiteralPath $outputServer -Destination $targetServer -Force
 Copy-Item -LiteralPath (Join-Path $projectDir 'manifest.json') -Destination (Join-Path $targetModDir 'manifest.json') -Force
 Write-Host ""
 Write-Host "==========================================" -ForegroundColor Green

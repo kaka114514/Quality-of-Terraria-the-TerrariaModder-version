@@ -16,7 +16,6 @@ namespace QualityOfTerraria.Features
     {
         public static bool IsEnabled = false;
         private static int _timer;
-        private const int PullInterval = 600;
         public static int TotalCatches;
         public static string LastCatchName = "暂无";
         public static string Status = "已关闭";
@@ -33,7 +32,7 @@ namespace QualityOfTerraria.Features
             _timer = 0;
             Status = IsEnabled ? "等待原版钓鱼结算" : "已关闭";
             SoundEngine.PlaySound(IsEnabled ? SoundID.MenuOpen : SoundID.MenuClose);
-            Main.NewText(IsEnabled ? "【自动钓鱼机】已启动，每10秒尝试一次。需要鱼竿、鱼饵及有效水体。" : "【自动钓鱼机】已关闭。", 100, 240, 255);
+            Main.NewText(IsEnabled ? "【自动钓鱼机】已启动，每" + IntervalSeconds + "秒尝试一次。需要鱼竿、鱼饵及有效水体。" : "【自动钓鱼机】已关闭。", 100, 240, 255);
         }
 
         public static void ResetSession()
@@ -51,7 +50,7 @@ namespace QualityOfTerraria.Features
             if (!IsEnabled || Main.gameMenu || Main.netMode == 2) return;
             Player player = Main.LocalPlayer;
             if (player == null || !player.active || player.dead) return;
-            if (++_timer < PullInterval) return;
+            if (++_timer < IntervalFrames) return;
             _timer = 0;
             PlayerFishingConditions conditions = player.GetFishingConditions();
             if (conditions.PoleItemType <= 0 || conditions.BaitItemType <= 0 || conditions.FinalFishingLevel <= 0)
@@ -82,6 +81,9 @@ namespace QualityOfTerraria.Features
             try { GiveItem(bobber, player, (int)bobber.ai[1]); }
             finally { _receivingPlayer = null; }
         }
+
+        private static int IntervalSeconds => Math.Max(1, Math.Min(60, Mod.Config?.AutoFishingIntervalSeconds ?? 10));
+        private static int IntervalFrames => IntervalSeconds * 60;
 
         private static void SetStatus(string value)
         {

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Reflection;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Input;
 using QualityOfTerraria.Features;
@@ -137,7 +138,158 @@ namespace QualityOfTerraria
                 ToolNetwork.Request("place", player.selectedItem, x1, y1, x2, y2);
                 return;
             }
+            // 大面积框选改为逐帧铺设，避免单帧内完成几千格放置和区块同步造成卡顿。
+            Item held = player.HeldItem;
+            if (_localJob == null && held != null && !held.IsAir && (held.createTile >= 0 || held.createWall > 0) &&
+                PlacementTiles(x1, y1, x2, y2) > SynchronousPlacementLimit)
+            {
+                var config = SettingsSync.GetPlayerConfig(player.whoAmI);
+                _localJob = CreatePlacementJob(player, player.selectedItem, held.createTile < 0, x1, y1, x2, y2, config != null && config.WandMaterialNoConsume);
+                UpdatePlacementJobs();
+                return;
+            }
             ApplyDragPlacement(player, x1, y1, x2, y2);
+        }
+
+        // 一次框选超过该格数时按帧铺设；每帧按原版 20 格区块推进，单帧开销固定。
+        internal const int SynchronousPlacementLimit = 256;
+        internal const int TileSyncSpan = 20;
+        internal const int PlacementChunksPerFrame = 1;
+
+        internal sealed class PlacementJob
+        {
+            internal Player Player;
+            internal int PlayerSlot, Slot, Type, Style, Prefix, Placed;
+            internal bool Wall, NoConsume, Done;
+            internal int MinX, MinY, MaxX, MaxY, ChunkX, ChunkY;
+            internal int SyncX1 = int.MaxValue, SyncY1 = int.MaxValue, SyncX2 = int.MinValue, SyncY2 = int.MinValue;
+        }
+
+        private static PlacementJob _localJob;
+
+        internal static int PlacementTiles(int x1, int y1, int x2, int y2)
+        {
+            return (Math.Abs(x2 - x1) + 1) * (Math.Abs(y2 - y1) + 1);
+        }
+
+        internal static PlacementJob CreatePlacementJob(Player player, int slot, bool wall, int x1, int y1, int x2, int y2, bool noConsume)
+        {
+            Item held = slot >= 0 && slot < player.inventory.Length ? player.inventory[slot] : null;
+            int minX = Math.Max(10, Math.Min(x1, x2)), maxX = Math.Min(Main.maxTilesX - 10, Math.Max(x1, x2));
+            int minY = Math.Max(10, Math.Min(y1, y2)), maxY = Math.Min(Main.maxTilesY - 10, Math.Max(y1, y2));
+            return new PlacementJob
+            {
+                Player = player, PlayerSlot = player.whoAmI, Slot = slot, Wall = wall, NoConsume = noConsume,
+                Type = held == null ? 0 : held.type, Style = held == null ? 0 : held.placeStyle, Prefix = held == null ? 0 : held.prefix,
+                MinX = minX, MaxX = maxX, MinY = minY, MaxY = maxY, ChunkX = minX, ChunkY = minY
+            };
+        }
+
+        internal static void UpdatePlacementJobs()
+        {
+            if (_localJob == null) return;
+            StepPlacementJob(_localJob, PlacementChunksPerFrame);
+            if (_localJob.Done) _localJob = null;
+        }
+
+        // 按原版 20 格区块分帧铺设；材料耗尽、玩家离开或材料改变时立即结束。
+        internal static void StepPlacementJob(PlacementJob job, int chunks)
+        {
+            if (job == null || job.Done) return;
+            Player player = job.Player;
+            if (player == null || !player.active || player.dead || job.PlayerSlot < 0 || job.PlayerSlot >= Main.player.Length ||
+                !ReferenceEquals(Main.player[job.PlayerSlot], player)) { FinishPlacementJob(job); return; }
+            Item held = job.Slot >= 0 && job.Slot < player.inventory.Length ? player.inventory[job.Slot] : null;
+            if (held == null || held.IsAir || held.type != job.Type || held.prefix != job.Prefix ||
+                (job.Wall ? held.createWall <= 0 : held.createTile < 0)) { FinishPlacementJob(job); return; }
+            int pickPower = job.Wall ? 0 : BestPickPower(player);
+            for (int slice = 0; slice < chunks && !job.Done; slice++)
+            {
+                if (job.ChunkX > job.MaxX) { FinishPlacementJob(job); return; }
+                int endX = Math.Min(job.MaxX, job.ChunkX + TileSyncSpan - 1);
+                int endY = Math.Min(job.MaxY, job.ChunkY + TileSyncSpan - 1);
+                // 只同步本次处理的原版区块：客户端收到的瓦片数量与实际铺设一致，
+                // 不会因为整片框选的包围盒而被成倍放大，联机时单帧结算量保持稳定。
+                job.SyncX1 = job.ChunkX; job.SyncY1 = job.ChunkY; job.SyncX2 = endX; job.SyncY2 = endY;
+                for (int x = job.ChunkX; x <= endX && !job.Done; x++)
+                {
+                    for (int y = job.ChunkY; y <= endY && !job.Done; y++)
+                    {
+                        Tile tile = Main.tile[x, y];
+                        if (tile == null) { tile = new Tile(); Main.tile[x, y] = tile; }
+                        bool placed;
+                        if (!job.Wall)
+                        {
+                            if (tile.active() && !TryReplaceTile(player, x, y, pickPower)) continue;
+                            PlaceTileSilently(player, held, x, y);
+                            placed = tile.active();
+                        }
+                        else
+                        {
+                            if (tile.wall != 0) continue;
+                            WorldGen.PlaceWall(x, y, held.createWall, true);
+                            placed = tile.wall > 0;
+                        }
+                        if (!placed) continue;
+                        job.Placed++;
+                        if (job.NoConsume) continue;
+                        held.stack--;
+                        if (held.stack > 0) continue;
+                        string name = held.Name;
+                        held.TurnToAir();
+                        Main.NewText($"快速放置：手持 [{name}] 已耗尽！共铺设 {job.Placed} 格。", 255, 160, 100);
+                        FinishPlacementJob(job);
+                        return;
+                    }
+                }
+                job.ChunkY += TileSyncSpan;
+                if (job.ChunkY > job.MaxY) { job.ChunkY = job.MinY; job.ChunkX += TileSyncSpan; }
+                FlushPlacementSync(job);
+            }
+        }
+
+        // 原版方块替换：背包里有能挖掉目标方块的镐子时，手中的方块可以直接替换它。
+        private static int BestPickPower(Player player)
+        {
+            int best = 0;
+            Item[] inventory = player.inventory;
+            for (int i = 0; i < inventory.Length; i++)
+            {
+                Item item = inventory[i];
+                if (item != null && !item.IsAir && item.pick > best) best = item.pick;
+            }
+            return best;
+        }
+
+        private static bool TryReplaceTile(Player player, int x, int y, int pickPower)
+        {
+            Tile tile = Main.tile[x, y];
+            if (tile == null || !tile.active()) return true;
+            if (pickPower <= 0 || !WorldGen.CanKillTile(x, y) || !VeinMiningSystem.CanMineTile(player, x, y, pickPower)) return false;
+            WorldGen.KillTile(x, y, false, false, false);
+            return !tile.active();
+        }
+
+        // 批量铺设必须静音：原版 PlaceTile 默认每格播放一次挖掘音效并生成尘土，
+        // 上千格会在单帧内触发上千次音效调用，造成明显卡顿；收尾统一播放一次音效。
+        private static void PlaceTileSilently(Player player, Item held, int x, int y)
+        {
+            WorldGen.PlaceTile(x, y, held.createTile, true, true, player.whoAmI, held.placeStyle);
+        }
+
+        private static void FinishPlacementJob(PlacementJob job)
+        {
+            job.Done = true;
+            FlushPlacementSync(job);
+            if (job.Placed > 0) SoundEngine.PlaySound(SoundID.Dig);
+        }
+
+        private static void FlushPlacementSync(PlacementJob job)
+        {
+            if (job.SyncX1 > job.SyncX2) return;
+            if (Main.netMode == 2) SyncTileArea(job.SyncX1, job.SyncY1, job.SyncX2, job.SyncY2);
+            job.SyncX1 = int.MaxValue; job.SyncY1 = int.MaxValue;
+            job.SyncX2 = int.MinValue; job.SyncY2 = int.MinValue;
         }
 
         internal static int ApplyDragPlacement(Player player, int x1, int y1, int x2, int y2)
@@ -171,6 +323,7 @@ namespace QualityOfTerraria
 
             int placed = 0;
             bool noConsume = config != null && config.WandMaterialNoConsume;
+            int pickPower = isTile ? BestPickPower(player) : 0;
 
             for (int x = minX; x <= maxX; x++)
             {
@@ -185,10 +338,10 @@ namespace QualityOfTerraria
 
                     if (isTile)
                     {
-                        // 放置方块/平台：仅在当前格未激活(为空)时放置，避免覆盖破坏已有实心结构
-                        if (!tile.active())
+                        // 空格直接放置；已有方块时按原版规则替换：背包里有能挖掉它的镐子即可。
+                        if (!tile.active() || TryReplaceTile(player, x, y, pickPower))
                         {
-                            WorldGen.PlaceTile(x, y, held.createTile, false, true, player.whoAmI, held.placeStyle);
+                            PlaceTileSilently(player, held, x, y);
                             if (tile.active())
                             {
                                 placed++;
@@ -210,7 +363,7 @@ namespace QualityOfTerraria
                         // 放置背景墙：仅在当前格无背景墙时铺设
                         if (tile.wall == 0)
                         {
-                            WorldGen.PlaceWall(x, y, held.createWall, false);
+                            WorldGen.PlaceWall(x, y, held.createWall, true);
                             if (tile.wall > 0)
                             {
                                 placed++;
@@ -434,6 +587,7 @@ namespace QualityOfTerraria
         {
             QuickPlaceActive = false;
             CurrentLiquidMode = LiquidWandMode.Off;
+            _localJob = null;
             _isDragging = _isDraggingQuickPlaceHud = _isDraggingLiquidHud = false;
             _hasHoverTile = false;
             _dragStartX = _dragStartY = _dragCurX = _dragCurY = _hoverTileX = _hoverTileY = -1;
@@ -458,8 +612,11 @@ namespace QualityOfTerraria
                 NPC npc = Main.npc[i];
                 if (npc != null && npc.active && npc.townNPC && !npc.homeless && npc.homeTileX > 0 && npc.homeTileY > 0)
                 {
-                    npc.position.X = npc.homeTileX * 16;
-                    npc.position.Y = (npc.homeTileY - 1) * 16;
+                    // 原版会按房屋入口、碰撞箱和平台状态寻找可站立格；直接把坐标设到
+                    // homeTileY - 1 会把大多数 NPC 放到房屋地板下方。
+                    MethodInfo teleport = typeof(NPC).GetMethod("AI_007_TownEntities_TeleportToHome", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    if (teleport != null) teleport.Invoke(npc, new object[] { npc.homeTileX, npc.homeTileY });
+                    else { npc.position.X = npc.homeTileX * 16; npc.position.Y = (npc.homeTileY - 1) * 16; }
                     npc.netUpdate = true;
                     if (Main.netMode == 2)
                     {
@@ -550,82 +707,6 @@ namespace QualityOfTerraria
                 Main.playerInventory = true;
                 SoundEngine.PlaySound(SoundID.MenuOpen);
             }
-        }
-
-        // ================= 6. 科技刷墙魔杖 (O 键) =================
-        public static void ExecuteWallWand()
-        {
-            if (!Mod.WorldActive || Main.gameMenu) return;
-            Player player = Main.LocalPlayer;
-            if (player == null || !player.active || player.dead)
-                return;
-
-            int slot = FindWallSlot(player);
-            if (Main.netMode == 1) { ToolNetwork.Request("wall", slot); return; }
-            ApplyWallWand(player);
-        }
-
-        internal static int FindWallSlot(Player player)
-        {
-            for (int slot = 0; slot < 50; slot++)
-                if (player.inventory[slot] != null && !player.inventory[slot].IsAir && player.inventory[slot].createWall > 0) return slot;
-            return -1;
-        }
-
-        internal static int ApplyWallWand(Player player)
-        {
-            var config = SettingsSync.GetPlayerConfig(player.whoAmI);
-            if (Main.netMode == 2 && config == null)
-            {
-                Main.NewText("正在等待个人设置交换确认，请稍后使用建造工具", 255, 180, 100);
-                return 0;
-            }
-            int slot = FindWallSlot(player);
-            Item wallMaterial = slot < 0 ? null : player.inventory[slot];
-
-            if (wallMaterial == null)
-            {
-                Main.NewText("快速铺墙：背包中没有背景墙！", 255, 100, 100);
-                return 0;
-            }
-
-            int pX = (int)(player.Center.X / 16f);
-            int pY = (int)(player.Center.Y / 16f);
-            int placed = 0;
-            bool noConsume = config != null && config.WandMaterialNoConsume;
-
-            for (int dx = -10; dx <= 10; dx++)
-            {
-                for (int dy = -10; dy <= 10; dy++)
-                {
-                    int x = pX + dx;
-                    int y = pY + dy;
-
-                    if (x < 10 || x >= Main.maxTilesX - 10 || y < 10 || y >= Main.maxTilesY - 10)
-                        continue;
-
-                    Tile tile = Main.tile[x, y];
-                    if (tile != null && tile.wall == 0)
-                    {
-                        WorldGen.PlaceWall(x, y, wallMaterial.createWall, false);
-                        if (tile.wall > 0)
-                        {
-                            placed++;
-                            if (!noConsume && wallMaterial.stack > 0)
-                            {
-                                wallMaterial.stack--;
-                                if (wallMaterial.stack <= 0)
-                                { wallMaterial.TurnToAir(); goto WallDone; }
-                            }
-                        }
-                    }
-                }
-            }
-
-        WallDone:
-            if (Main.netMode == 2) SyncTileArea(pX - 10, pY - 10, pX + 10, pY + 10);
-            SoundEngine.PlaySound(SoundID.Dig);
-            return placed;
         }
 
         // ================= 7. 气象控制 (U 键) =================

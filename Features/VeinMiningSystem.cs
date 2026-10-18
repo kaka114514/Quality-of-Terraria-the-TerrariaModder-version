@@ -22,6 +22,22 @@ namespace QualityOfTerraria.Features
         private static readonly Action<Player, WorldItem> Pickup = AccessTools.MethodDelegate<Action<Player, WorldItem>>(AccessTools.Method(typeof(Player), "PickupItem"));
         [ThreadStatic] private static DropContext _drops;
 
+        // 多人模式下完成的连锁挖矿任务，用于向客户端报告（键=玩家 whoAmI）
+        private static readonly Dictionary<int, CompletedJob> _completedJobs = new Dictionary<int, CompletedJob>();
+
+        internal sealed class CompletedJob
+        {
+            internal int Count;
+            internal string OreName;
+        }
+
+        internal static CompletedJob TakeCompletedJob(int playerWhoAmI)
+        {
+            if (!_completedJobs.TryGetValue(playerWhoAmI, out var job)) return null;
+            _completedJobs.Remove(playerWhoAmI);
+            return job;
+        }
+
         private sealed class Job
         {
             internal Player Player;
@@ -41,12 +57,28 @@ namespace QualityOfTerraria.Features
             internal bool AutoLoot;
         }
 
-        internal static bool IsOre(ushort type) => type < TileID.Sets.Ore.Length && TileID.Sets.Ore[type];
+        internal static bool IsOre(ushort type)
+        {
+            // 原版矿石判定
+            if (type < TileID.Sets.Ore.Length && TileID.Sets.Ore[type])
+                return true;
+
+            // 手动添加宝石方块支持（泰拉瑞亚可能没有将它们标记为 Ore）
+            // 紫水晶(63), 黄玉(64), 蓝宝石(65), 绿宝石(66), 红宝石(67), 钻石(68), 琥珀(178)
+            return type == 63 || type == 64 || type == 65 || type == 66 || type == 67 || type == 68 || type == 178;
+        }
 
         internal static bool CanMine(Player player, int x, int y, QualityOfTerrariaConfig config)
             => config != null && CanMine(player, x, y, config.VeinMiningCheckPickaxePower);
 
         internal static bool CanMineOrigin(Player player, int x, int y) => CanMine(player, x, y, true);
+
+        // 建造工具复用同一套原版镐力判定：该镐力能否破坏这块瓦片。
+        internal static bool CanMineTile(Player player, int x, int y, int pickPower)
+        {
+            Tile tile = Main.tile[x, y];
+            return player != null && pickPower > 0 && tile != null && tile.active() && GetDamage(player, x, y, pickPower, 0, tile) > 0;
+        }
 
         private static bool CanMine(Player player, int x, int y, bool checkPower)
         {
@@ -63,6 +95,7 @@ namespace QualityOfTerraria.Features
             if (Suspended || Main.netMode == 1 || !Mod.WorldActive || Main.gameMenu || player == null || !player.active || player.dead || config == null || !IsOre(oreType) || !WorldGen.InWorld(x, y, 1)) return false;
             if (player.whoAmI < 0 || player.whoAmI >= Main.player.Length || Main.player[player.whoAmI] != player || player.HeldItem == null || player.HeldItem.pick <= 0) return false;
             foreach (Job active in Jobs) if (active.Player == player) return false;
+            Mod.LogInfo($"[连锁挖矿系统] 启动任务: player.whoAmI={player.whoAmI}, 坐标=({x},{y}), 矿石={oreType}");
             Job job = new Job
             {
                 Player = player, World = Main.tile, X = x, Y = y, Type = oreType,
@@ -120,11 +153,24 @@ namespace QualityOfTerraria.Features
                         AddNeighbors(job, point.X, point.Y);
                     }
                     if (job.Pending.Count > 0 && job.Count < job.Limit) Jobs.Enqueue(job);
-                    else if (job.ShowMessages && Main.netMode == 0 && job.Count > 1)
+                    else
                     {
-                        string oreName = job.LastDropItemType > 0 ? Lang.GetItemNameValue(job.LastDropItemType) : null;
-                        if (string.IsNullOrEmpty(oreName)) oreName = "矿石";
-                        Main.NewText("【连锁挖矿】连锁挖掉 " + job.Count + " 个" + oreName, 100, 240, 255);
+                        // 任务完成（无论挖了多少个）
+                        if (Main.netMode == 2)
+                        {
+                            // 多人模式：保存结果，由 VeinMiningNetwork 取走并发送给客户端
+                            string oreName = job.LastDropItemType > 0 ? Lang.GetItemNameValue(job.LastDropItemType) : null;
+                            if (string.IsNullOrEmpty(oreName)) oreName = "矿石";
+                            Mod.LogInfo($"[连锁挖矿系统] 任务完成: player.whoAmI={player.whoAmI}, count={job.Count}, ore={oreName}");
+                            _completedJobs[player.whoAmI] = new CompletedJob { Count = job.Count, OreName = oreName };
+                        }
+                        else if (job.ShowMessages && Main.netMode == 0 && job.Count > 1)
+                        {
+                            // 单机模式：只在挖掉多个方块时显示提示
+                            string oreName = job.LastDropItemType > 0 ? Lang.GetItemNameValue(job.LastDropItemType) : null;
+                            if (string.IsNullOrEmpty(oreName)) oreName = "矿石";
+                            Main.NewText("【连锁挖矿】连锁挖掉 " + job.Count + " 个" + oreName, 100, 240, 255);
+                        }
                     }
                 }
                 catch (Exception exception) { Mod.LogError("连锁挖矿任务已停止。", exception); }

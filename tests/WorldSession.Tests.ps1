@@ -5,6 +5,7 @@ $panelStubs = ($panels | ForEach-Object { @"
 public static class $_ {
     public const string PanelId = "$_";
     public static bool IsOpen = true;
+    public static bool Visible = true;
     public static float SpawnRateMultiplier = 1f;
     public static void Initialize() {}
     public static void Draw() { if (IsOpen) Counter.Draws++; }
@@ -31,6 +32,7 @@ namespace QualityOfTerraria {
 namespace QualityOfTerraria.Features {
     public static class Autofisher { public static void Update() {} public static void ResetSession() {} }
     public static class StructureLocator { public static void Update() {} public static void ResetSession() {} }
+    public static class StructureMapMarker { public static void EnsureRegistered() {} }
     public static class TargetDummySystem { public static void Update() {} public static void DrawHUD() {} public static void ResetSession() {} }
 }
 namespace QualityOfTerraria.Patches {
@@ -89,6 +91,20 @@ namespace QualityOfTerraria.UI {
                 "退出时关闭全部窗口并清理工具状态");
             UIManager.UpdateAll();
             Check(TerrariaModder.Core.UI.UIRenderer.Bounds.Contains("OtherMod.Panel"), "会话清理保留其他模组的UI边界");
+            TerrariaModder.Core.UI.UIRenderer.Bounds.Add(ExtremeStorageUI.PanelId);
+            TerrariaModder.Core.UI.UIRenderer.Bounds.Add(SuperVaultUI.PanelId);
+            TerrariaModder.Core.UI.UIRenderer.Bounds.Add(PlayerStatsUI.PanelId);
+            PlayerStatsUI.IsOpen = true;
+            var clearClosed = typeof(UIManager).GetMethod("ClearClosedPanelBounds", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            Check(clearClosed != null, "提供清理已关闭面板边界的入口");
+            if (clearClosed != null) {
+                clearClosed.Invoke(null, null);
+                Check(!TerrariaModder.Core.UI.UIRenderer.Bounds.Contains(ExtremeStorageUI.PanelId)
+                    && !TerrariaModder.Core.UI.UIRenderer.Bounds.Contains(SuperVaultUI.PanelId)
+                    && TerrariaModder.Core.UI.UIRenderer.Bounds.Contains(PlayerStatsUI.PanelId)
+                    && TerrariaModder.Core.UI.UIRenderer.Bounds.Contains("OtherMod.Panel"), "只移除关闭的本模组面板边界，保留其他模组边界");
+            }
+            PlayerStatsUI.IsOpen = false;
             SuperVaultUI.IsOpen = true;
             Terraria.Main.gameMenu = true;
             UIManager.UpdateAll();
