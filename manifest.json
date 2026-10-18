@@ -1,10 +1,10 @@
 {
   "id": "quality-of-terraria",
   "name": "Quality of Terraria 更好的体验",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "framework_version": ">=0.4.1",
   "author": "487666123 / Ported for TerrariaModder",
-  "description": "提供终极存储、100格大背包、分类与前缀搜索、保留前缀的跨箱合并整理，以及快速放置、快速铺墙、液体吸放、自动钓鱼、结构定位、假人DPS和角色属性面板。支持物品原版染色与动画，便利功能可在模组设置中调整。",
+  "description": "移植自 tModLoader MOD 更好的体验",
   "entry_dll": "QualityOfTerraria.dll",
   "keybinds": [
     {
@@ -44,12 +44,6 @@
       "default": "B"
     },
     {
-      "id": "wall-wand",
-      "label": "快速铺墙",
-      "description": "使用背包中的背景墙，快速铺满周围无墙区域",
-      "default": "O"
-    },
-    {
       "id": "weather-control",
       "label": "切换晴雨",
       "description": "切换下雨和放晴",
@@ -76,7 +70,7 @@
     {
       "id": "spawn-rate-control",
       "label": "刷怪率与节日控制",
-      "description": "调节0～30倍刷怪率及节日、世界特性；联机由服务器控制",
+      "description": "调节0～100倍刷怪率及节日、世界特性；联机由房主／管理员提交",
       "default": "OPENBRACKET"
     },
     {
@@ -90,7 +84,25 @@
       "label": "测试假人桩",
       "description": "在鼠标处放置或移除测试假人，实时统计DPS",
       "default": "X"
+    },
+    {
+      "id": "toggle-vein-mining",
+      "label": "切换连锁挖矿",
+      "description": "开启或关闭相连矿石的连锁挖掘",
+      "default": "V"
+    },
+    {
+      "id": "toggle-speed-boost",
+      "label": "切换工具加速",
+      "description": "暂停或恢复挖掘、砍伐和放置速度加成",
+      "default": "Backslash"
+    },
+    {
+      "id": "force-vein-mine",
+      "label": "强制连锁挖矿（按住）",
+      "description": "按住左Shift临时连锁挖矿，松开后恢复原开关",
+      "default": "LeftShift"
     }
   ],
-  "multiplayer": "optional"
+  "multiplayer": "required"
 }

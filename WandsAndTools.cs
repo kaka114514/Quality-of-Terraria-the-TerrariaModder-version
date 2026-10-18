@@ -1,9 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Reflection;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Input;
 using QualityOfTerraria.Features;
 using QualityOfTerraria.UI;
+using QualityOfTerraria.Networking;
 using Terraria;
 using Terraria.Audio;
 using Terraria.DataStructures;
@@ -131,11 +133,178 @@ namespace QualityOfTerraria
 
         private static void ExecuteDragPlacement(Player player, int x1, int y1, int x2, int y2)
         {
+            if (Main.netMode == 1)
+            {
+                ToolNetwork.Request("place", player.selectedItem, x1, y1, x2, y2);
+                return;
+            }
+            // 大面积框选改为逐帧铺设，避免单帧内完成几千格放置和区块同步造成卡顿。
+            Item held = player.HeldItem;
+            if (_localJob == null && held != null && !held.IsAir && (held.createTile >= 0 || held.createWall > 0) &&
+                PlacementTiles(x1, y1, x2, y2) > SynchronousPlacementLimit)
+            {
+                var config = SettingsSync.GetPlayerConfig(player.whoAmI);
+                _localJob = CreatePlacementJob(player, player.selectedItem, held.createTile < 0, x1, y1, x2, y2, config != null && config.WandMaterialNoConsume);
+                UpdatePlacementJobs();
+                return;
+            }
+            ApplyDragPlacement(player, x1, y1, x2, y2);
+        }
+
+        // 一次框选超过该格数时按帧铺设；每帧按原版 20 格区块推进，单帧开销固定。
+        internal const int SynchronousPlacementLimit = 256;
+        internal const int TileSyncSpan = 20;
+        internal const int PlacementChunksPerFrame = 1;
+
+        internal sealed class PlacementJob
+        {
+            internal Player Player;
+            internal int PlayerSlot, Slot, Type, Style, Prefix, Placed;
+            internal bool Wall, NoConsume, Done;
+            internal int MinX, MinY, MaxX, MaxY, ChunkX, ChunkY;
+            internal int SyncX1 = int.MaxValue, SyncY1 = int.MaxValue, SyncX2 = int.MinValue, SyncY2 = int.MinValue;
+        }
+
+        private static PlacementJob _localJob;
+
+        internal static int PlacementTiles(int x1, int y1, int x2, int y2)
+        {
+            return (Math.Abs(x2 - x1) + 1) * (Math.Abs(y2 - y1) + 1);
+        }
+
+        internal static PlacementJob CreatePlacementJob(Player player, int slot, bool wall, int x1, int y1, int x2, int y2, bool noConsume)
+        {
+            Item held = slot >= 0 && slot < player.inventory.Length ? player.inventory[slot] : null;
+            int minX = Math.Max(10, Math.Min(x1, x2)), maxX = Math.Min(Main.maxTilesX - 10, Math.Max(x1, x2));
+            int minY = Math.Max(10, Math.Min(y1, y2)), maxY = Math.Min(Main.maxTilesY - 10, Math.Max(y1, y2));
+            return new PlacementJob
+            {
+                Player = player, PlayerSlot = player.whoAmI, Slot = slot, Wall = wall, NoConsume = noConsume,
+                Type = held == null ? 0 : held.type, Style = held == null ? 0 : held.placeStyle, Prefix = held == null ? 0 : held.prefix,
+                MinX = minX, MaxX = maxX, MinY = minY, MaxY = maxY, ChunkX = minX, ChunkY = minY
+            };
+        }
+
+        internal static void UpdatePlacementJobs()
+        {
+            if (_localJob == null) return;
+            StepPlacementJob(_localJob, PlacementChunksPerFrame);
+            if (_localJob.Done) _localJob = null;
+        }
+
+        // 按原版 20 格区块分帧铺设；材料耗尽、玩家离开或材料改变时立即结束。
+        internal static void StepPlacementJob(PlacementJob job, int chunks)
+        {
+            if (job == null || job.Done) return;
+            Player player = job.Player;
+            if (player == null || !player.active || player.dead || job.PlayerSlot < 0 || job.PlayerSlot >= Main.player.Length ||
+                !ReferenceEquals(Main.player[job.PlayerSlot], player)) { FinishPlacementJob(job); return; }
+            Item held = job.Slot >= 0 && job.Slot < player.inventory.Length ? player.inventory[job.Slot] : null;
+            if (held == null || held.IsAir || held.type != job.Type || held.prefix != job.Prefix ||
+                (job.Wall ? held.createWall <= 0 : held.createTile < 0)) { FinishPlacementJob(job); return; }
+            int pickPower = job.Wall ? 0 : BestPickPower(player);
+            for (int slice = 0; slice < chunks && !job.Done; slice++)
+            {
+                if (job.ChunkX > job.MaxX) { FinishPlacementJob(job); return; }
+                int endX = Math.Min(job.MaxX, job.ChunkX + TileSyncSpan - 1);
+                int endY = Math.Min(job.MaxY, job.ChunkY + TileSyncSpan - 1);
+                // 只同步本次处理的原版区块：客户端收到的瓦片数量与实际铺设一致，
+                // 不会因为整片框选的包围盒而被成倍放大，联机时单帧结算量保持稳定。
+                job.SyncX1 = job.ChunkX; job.SyncY1 = job.ChunkY; job.SyncX2 = endX; job.SyncY2 = endY;
+                for (int x = job.ChunkX; x <= endX && !job.Done; x++)
+                {
+                    for (int y = job.ChunkY; y <= endY && !job.Done; y++)
+                    {
+                        Tile tile = Main.tile[x, y];
+                        if (tile == null) { tile = new Tile(); Main.tile[x, y] = tile; }
+                        bool placed;
+                        if (!job.Wall)
+                        {
+                            if (tile.active() && !TryReplaceTile(player, x, y, pickPower)) continue;
+                            PlaceTileSilently(player, held, x, y);
+                            placed = tile.active();
+                        }
+                        else
+                        {
+                            if (tile.wall != 0) continue;
+                            WorldGen.PlaceWall(x, y, held.createWall, true);
+                            placed = tile.wall > 0;
+                        }
+                        if (!placed) continue;
+                        job.Placed++;
+                        if (job.NoConsume) continue;
+                        held.stack--;
+                        if (held.stack > 0) continue;
+                        string name = held.Name;
+                        held.TurnToAir();
+                        Main.NewText($"快速放置：手持 [{name}] 已耗尽！共铺设 {job.Placed} 格。", 255, 160, 100);
+                        FinishPlacementJob(job);
+                        return;
+                    }
+                }
+                job.ChunkY += TileSyncSpan;
+                if (job.ChunkY > job.MaxY) { job.ChunkY = job.MinY; job.ChunkX += TileSyncSpan; }
+                FlushPlacementSync(job);
+            }
+        }
+
+        // 原版方块替换：背包里有能挖掉目标方块的镐子时，手中的方块可以直接替换它。
+        private static int BestPickPower(Player player)
+        {
+            int best = 0;
+            Item[] inventory = player.inventory;
+            for (int i = 0; i < inventory.Length; i++)
+            {
+                Item item = inventory[i];
+                if (item != null && !item.IsAir && item.pick > best) best = item.pick;
+            }
+            return best;
+        }
+
+        private static bool TryReplaceTile(Player player, int x, int y, int pickPower)
+        {
+            Tile tile = Main.tile[x, y];
+            if (tile == null || !tile.active()) return true;
+            if (pickPower <= 0 || !WorldGen.CanKillTile(x, y) || !VeinMiningSystem.CanMineTile(player, x, y, pickPower)) return false;
+            WorldGen.KillTile(x, y, false, false, false);
+            return !tile.active();
+        }
+
+        // 批量铺设必须静音：原版 PlaceTile 默认每格播放一次挖掘音效并生成尘土，
+        // 上千格会在单帧内触发上千次音效调用，造成明显卡顿；收尾统一播放一次音效。
+        private static void PlaceTileSilently(Player player, Item held, int x, int y)
+        {
+            WorldGen.PlaceTile(x, y, held.createTile, true, true, player.whoAmI, held.placeStyle);
+        }
+
+        private static void FinishPlacementJob(PlacementJob job)
+        {
+            job.Done = true;
+            FlushPlacementSync(job);
+            if (job.Placed > 0) SoundEngine.PlaySound(SoundID.Dig);
+        }
+
+        private static void FlushPlacementSync(PlacementJob job)
+        {
+            if (job.SyncX1 > job.SyncX2) return;
+            if (Main.netMode == 2) SyncTileArea(job.SyncX1, job.SyncY1, job.SyncX2, job.SyncY2);
+            job.SyncX1 = int.MaxValue; job.SyncY1 = int.MaxValue;
+            job.SyncX2 = int.MinValue; job.SyncY2 = int.MinValue;
+        }
+
+        internal static int ApplyDragPlacement(Player player, int x1, int y1, int x2, int y2)
+        {
+            var config = SettingsSync.GetPlayerConfig(player.whoAmI);
+            if (Main.netMode == 2 && config == null)
+            {
+                Main.NewText("正在等待个人设置交换确认，请稍后使用建造工具", 255, 180, 100);
+                return 0;
+            }
             Item held = player.HeldItem;
             if (held == null || held.IsAir)
             {
                 Main.NewText("快速放置：手中没有物品！请手持方块、平台或墙壁。", 255, 120, 120);
-                return;
+                return 0;
             }
 
             bool isTile = held.createTile >= 0;
@@ -144,7 +313,7 @@ namespace QualityOfTerraria
             if (!isTile && !isWall)
             {
                 Main.NewText($"快速放置：当前手持物品 [{held.Name}] 不是可放置的方块、平台或背景墙！", 255, 120, 120);
-                return;
+                return 0;
             }
 
             int minX = Math.Max(10, Math.Min(x1, x2));
@@ -153,7 +322,8 @@ namespace QualityOfTerraria
             int maxY = Math.Min(Main.maxTilesY - 10, Math.Max(y1, y2));
 
             int placed = 0;
-            bool noConsume = Mod.Config != null && Mod.Config.WandMaterialNoConsume;
+            bool noConsume = config != null && config.WandMaterialNoConsume;
+            int pickPower = isTile ? BestPickPower(player) : 0;
 
             for (int x = minX; x <= maxX; x++)
             {
@@ -168,10 +338,10 @@ namespace QualityOfTerraria
 
                     if (isTile)
                     {
-                        // 放置方块/平台：仅在当前格未激活(为空)时放置，避免覆盖破坏已有实心结构
-                        if (!tile.active())
+                        // 空格直接放置；已有方块时按原版规则替换：背包里有能挖掉它的镐子即可。
+                        if (!tile.active() || TryReplaceTile(player, x, y, pickPower))
                         {
-                            WorldGen.PlaceTile(x, y, held.createTile, false, true, player.whoAmI, held.placeStyle);
+                            PlaceTileSilently(player, held, x, y);
                             if (tile.active())
                             {
                                 placed++;
@@ -193,7 +363,7 @@ namespace QualityOfTerraria
                         // 放置背景墙：仅在当前格无背景墙时铺设
                         if (tile.wall == 0)
                         {
-                            WorldGen.PlaceWall(x, y, held.createWall, false);
+                            WorldGen.PlaceWall(x, y, held.createWall, true);
                             if (tile.wall > 0)
                             {
                                 placed++;
@@ -217,21 +387,9 @@ namespace QualityOfTerraria
             if (placed > 0)
             {
                 SoundEngine.PlaySound(SoundID.Dig);
-                if (Main.netMode == 1)
-                {
-                    // 联机模式下分块同步 Tile，避免超大单包造成网络丢包或断连
-                    int chunkSize = 20;
-                    for (int cx = minX; cx <= maxX; cx += chunkSize)
-                    {
-                        for (int cy = minY; cy <= maxY; cy += chunkSize)
-                        {
-                            int cw = Math.Min(chunkSize, maxX - cx + 1);
-                            int ch = Math.Min(chunkSize, maxY - cy + 1);
-                            NetMessage.SendTileSquare(-1, cx, cy, Math.Max(cw, ch));
-                        }
-                    }
-                }
+                if (Main.netMode == 2) SyncTileArea(minX, minY, maxX, maxY);
             }
+            return placed;
         }
 
         // 精确将瓦片世界坐标投影为 UI 屏幕坐标 (融合 ZoomMatrix 视距缩放与 UIScale 界面比例)
@@ -265,7 +423,7 @@ namespace QualityOfTerraria
         }
 
         public static LiquidWandMode CurrentLiquidMode = LiquidWandMode.Off;
-        // 储量使用原版液体单位（255 单位 = 1 格），保留至本次游戏进程结束。
+        // 储量使用原版液体单位（255 单位 = 1 格）；单机在游戏进程保留，联机由服务器保存本世界会话库存。
         public static int StoredWater = 0;
         public static int StoredLava = 0;
         public static int StoredShimmer = 0;
@@ -321,8 +479,21 @@ namespace QualityOfTerraria
             if (mX < 10 || mX >= Main.maxTilesX - 10 || mY < 10 || mY >= Main.maxTilesY - 10)
                 return;
 
+            bool absorb = keyState.IsKeyDown(Keys.OemSemicolon);
+            bool release = keyState.IsKeyDown(Keys.OemQuotes);
+            if (!absorb && !release) return;
+            if (Main.netMode == 1)
+            {
+                ToolNetwork.Request("liquid", -1, mX, mY, (int)CurrentLiquidMode, absorb ? 1 : 0, release ? 1 : 0);
+                return;
+            }
+            ApplyLiquid(mX, mY, CurrentLiquidMode, absorb, release);
+        }
+
+        internal static void ApplyLiquid(int mX, int mY, LiquidWandMode mode, bool absorb, bool release)
+        {
             // 1. 按住 ; 键 (OemSemicolon)：吸收鼠标指针周围液体
-            if (keyState.IsKeyDown(Keys.OemSemicolon))
+            if (absorb)
             {
                 for (int dx = -2; dx <= 2; dx++)
                 {
@@ -341,7 +512,7 @@ namespace QualityOfTerraria
 
                             tile.liquid = 0;
                             WorldGen.SquareTileFrame(x, y, true);
-                            if (Main.netMode == 1)
+                            if (Main.netMode == 2)
                             {
                                 NetMessage.sendWater(x, y);
                             }
@@ -351,7 +522,7 @@ namespace QualityOfTerraria
             }
 
             // 2. 按住 ' 键 (OemQuotes)：在鼠标所在格生成流体
-            if (keyState.IsKeyDown(Keys.OemQuotes))
+            if (release)
             {
                 Tile tile = Main.tile[mX, mY];
                 if (tile != null && (!tile.active() || !Main.tileSolid[tile.type]))
@@ -359,7 +530,7 @@ namespace QualityOfTerraria
                     int targetLiquidType = 0;
                     int amount = 0;
 
-                    switch (CurrentLiquidMode)
+                    switch (mode)
                     {
                         case LiquidWandMode.Water:
                             targetLiquidType = 0;
@@ -385,7 +556,7 @@ namespace QualityOfTerraria
                         tile.liquidType(targetLiquidType);
                         Liquid.AddWater(mX, mY);
                         WorldGen.SquareTileFrame(mX, mY, true);
-                        if (Main.netMode == 1)
+                        if (Main.netMode == 2)
                         {
                             NetMessage.sendWater(mX, mY);
                         }
@@ -416,6 +587,7 @@ namespace QualityOfTerraria
         {
             QuickPlaceActive = false;
             CurrentLiquidMode = LiquidWandMode.Off;
+            _localJob = null;
             _isDragging = _isDraggingQuickPlaceHud = _isDraggingLiquidHud = false;
             _hasHoverTile = false;
             _dragStartX = _dragStartY = _dragCurX = _dragCurY = _hoverTileX = _hoverTileY = -1;
@@ -426,16 +598,27 @@ namespace QualityOfTerraria
         public static void ExecuteNPCHome()
         {
             if (!Mod.WorldActive || Main.gameMenu) return;
+            if (Main.netMode == 1) { ToolNetwork.Request("home"); return; }
+            int count = ApplyNPCHome();
+            SoundEngine.PlaySound(SoundID.MenuOpen);
+            Main.NewText($"城镇管理：已将 {count} 位城镇NPC召回房间！", 150, 255, 150);
+        }
+
+        internal static int ApplyNPCHome()
+        {
             int count = 0;
             for (int i = 0; i < Main.maxNPCs; i++)
             {
                 NPC npc = Main.npc[i];
                 if (npc != null && npc.active && npc.townNPC && !npc.homeless && npc.homeTileX > 0 && npc.homeTileY > 0)
                 {
-                    npc.position.X = npc.homeTileX * 16;
-                    npc.position.Y = (npc.homeTileY - 1) * 16;
+                    // 原版会按房屋入口、碰撞箱和平台状态寻找可站立格；直接把坐标设到
+                    // homeTileY - 1 会把大多数 NPC 放到房屋地板下方。
+                    MethodInfo teleport = typeof(NPC).GetMethod("AI_007_TownEntities_TeleportToHome", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    if (teleport != null) teleport.Invoke(npc, new object[] { npc.homeTileX, npc.homeTileY });
+                    else { npc.position.X = npc.homeTileX * 16; npc.position.Y = (npc.homeTileY - 1) * 16; }
                     npc.netUpdate = true;
-                    if (Main.netMode == 1)
+                    if (Main.netMode == 2)
                     {
                         NetMessage.SendData(MessageID.SyncNPC, -1, -1, null, i);
                     }
@@ -443,8 +626,7 @@ namespace QualityOfTerraria
                 }
             }
 
-            SoundEngine.PlaySound(SoundID.MenuOpen);
-            Main.NewText($"城镇管理：已将 {count} 位城镇NPC召回房间！", 150, 255, 150);
+            return count;
         }
 
         // ================= 4. 快捷护士瞬间治疗 (H 键，收费与判空) =================
@@ -455,29 +637,20 @@ namespace QualityOfTerraria
             if (player == null || !player.active || player.dead)
                 return;
 
-            long missingLife = player.statLifeMax2 - player.statLife;
-            int debuffCount = 0;
-            for (int i = 0; i < player.buffType.Length; i++)
+            if (RemoteStorageOperations.Busy || ToolNetwork.Busy)
             {
-                int b = player.buffType[i];
-                if (b > 0 && Main.debuff[b] && !Main.buffNoTimeDisplay[b])
-                {
-                    debuffCount++;
-                }
-            }
-
-            if (missingLife <= 0 && debuffCount == 0)
-            {
-                Main.NewText("生命值已满且无负面状态，无需治疗！", 120, 255, 120);
+                Main.NewText("正在等待服务器物品操作确认，请稍后治疗", 255, 180, 100);
                 return;
             }
-
-            // 护士收费计算：基础每点损失生命值 0.75 铜币，每个 Debuff 10 银币 (1000 铜币)
-            long cost = (long)(missingLife * 0.75f) + debuffCount * 1000;
-            if (cost < 1) cost = 1;
+            int missingLife = Math.Max(0, player.statLifeMax2 - player.statLife);
+            if (!NurseTreatment.NeedsTreatment(player))
+            {
+                Main.NewText(NurseTreatment.NoTreatment, 120, 255, 120);
+                return;
+            }
+            long cost = NurseTreatment.Cost();
             string costStr = FormatCoins(cost);
-
-            if (!player.BuyItem(cost))
+            if (cost > 0 && !player.BuyItem(cost))
             {
                 Main.NewText($"钱币不足！护士治疗需要 {costStr}，护士拒绝治疗！", 255, 100, 100);
                 return;
@@ -487,15 +660,7 @@ namespace QualityOfTerraria
             player.statLife = player.statLifeMax2;
             player.statMana = player.statManaMax2;
 
-            for (int i = 0; i < player.buffType.Length; i++)
-            {
-                int b = player.buffType[i];
-                if (b > 0 && Main.debuff[b] && !Main.buffNoTimeDisplay[b])
-                {
-                    player.DelBuff(i);
-                    i--;
-                }
-            }
+            NurseTreatment.ClearDebuffs(player);
 
             player.HealEffect(healed);
             SoundEngine.PlaySound(SoundID.Item4);
@@ -544,76 +709,16 @@ namespace QualityOfTerraria
             }
         }
 
-        // ================= 6. 科技刷墙魔杖 (O 键) =================
-        public static void ExecuteWallWand()
-        {
-            if (!Mod.WorldActive || Main.gameMenu) return;
-            Player player = Main.LocalPlayer;
-            if (player == null || !player.active || player.dead)
-                return;
-
-            Item wallMaterial = null;
-            for (int i = 0; i < 50; i++)
-            {
-                Item it = player.inventory[i];
-                if (it != null && !it.IsAir && it.createWall > 0)
-                {
-                    wallMaterial = it;
-                    break;
-                }
-            }
-
-            if (wallMaterial == null)
-            {
-                Main.NewText("快速铺墙：背包中没有背景墙！", 255, 100, 100);
-                return;
-            }
-
-            int pX = (int)(player.Center.X / 16f);
-            int pY = (int)(player.Center.Y / 16f);
-            int placed = 0;
-            bool noConsume = Mod.Config != null && Mod.Config.WandMaterialNoConsume;
-
-            for (int dx = -10; dx <= 10; dx++)
-            {
-                for (int dy = -10; dy <= 10; dy++)
-                {
-                    int x = pX + dx;
-                    int y = pY + dy;
-
-                    if (x < 10 || x >= Main.maxTilesX - 10 || y < 10 || y >= Main.maxTilesY - 10)
-                        continue;
-
-                    Tile tile = Main.tile[x, y];
-                    if (tile != null && tile.wall == 0)
-                    {
-                        WorldGen.PlaceWall(x, y, wallMaterial.createWall, false);
-                        if (tile.wall > 0)
-                        {
-                            placed++;
-                            if (!noConsume && wallMaterial.stack > 0)
-                            {
-                                wallMaterial.stack--;
-                                if (wallMaterial.stack <= 0)
-                                    wallMaterial.TurnToAir();
-                            }
-
-                            if (Main.netMode == 1)
-                            {
-                                NetMessage.SendTileSquare(-1, x, y, 1);
-                            }
-                        }
-                    }
-                }
-            }
-
-            SoundEngine.PlaySound(SoundID.Dig);
-        }
-
         // ================= 7. 气象控制 (U 键) =================
         public static void ExecuteWeatherController()
         {
             if (!Mod.WorldActive || Main.gameMenu) return;
+            if (Main.netMode == 1) { ToolNetwork.Request("weather"); return; }
+            ApplyWeather();
+        }
+
+        internal static void ApplyWeather()
+        {
             if (!Main.raining)
             {
                 Main.StartRain();
@@ -628,13 +733,22 @@ namespace QualityOfTerraria
                 Main.NewText("气象控制：天气转晴！", 255, 230, 100);
             }
 
-            if (Main.netMode == 1)
+            if (Main.netMode == 2)
             {
                 NetMessage.SendData(MessageID.WorldData);
             }
         }
 
 
+
+        internal static void SyncTileArea(int minX, int minY, int maxX, int maxY)
+        {
+            minX = Math.Max(10, minX); minY = Math.Max(10, minY);
+            maxX = Math.Min(Main.maxTilesX - 11, maxX); maxY = Math.Min(Main.maxTilesY - 11, maxY);
+            for (int x = minX; x <= maxX; x += 20)
+                for (int y = minY; y <= maxY; y += 20)
+                    NetMessage.SendTileSquare(-1, x, y, Math.Min(20, maxX - x + 1), Math.Min(20, maxY - y + 1));
+        }
 
         // HUD 坐标与可拖拽支持
         public static int QuickPlaceHudX = 20;
@@ -790,7 +904,7 @@ namespace QualityOfTerraria
 
                 UIRenderer.DrawPanel(LiquidHudX, LiquidHudY, LiquidHudW, LiquidHudH, 25, 25, 35, 220);
                 UIRenderer.DrawRectOutline(LiquidHudX, LiquidHudY, LiquidHudW, LiquidHudH, r, g, b, 255, 1);
-                PanelLayout.DrawFittedText($"[液体魔杖: {modeName}] 已存: {count / 255.0:0.##} 格（本次游戏） | [;] 吸收 | ['] 放置", LiquidHudX + 10, LiquidHudY + 8, LiquidHudW - 20, r, g, b);
+                PanelLayout.DrawFittedText($"[液体魔杖: {modeName}] 已存: {count / 255.0:0.##} 格（{(Main.netMode == 1 ? ToolNetwork.LiquidStatus : "本次游戏")}） | [;] 吸收 | ['] 放置", LiquidHudX + 10, LiquidHudY + 8, LiquidHudW - 20, r, g, b);
             }
         }
     }

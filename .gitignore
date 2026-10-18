@@ -1,6 +1,7 @@
 # Build output
 bin/
 obj/
+github_push/
 
 # Visual Studio / Rider / VSCode
 .vs/

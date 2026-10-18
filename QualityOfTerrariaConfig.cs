@@ -1,21 +1,78 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using TerrariaModder.Core.Config;
+
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("QualityOfTerraria.Server")]
 
 namespace QualityOfTerraria
 {
     public class QualityOfTerrariaConfig : ModConfig
     {
-        public override int Version => 1;
+        internal bool NeedsVeinMinerImport;
+        internal string VeinImportStateError;
+        private bool _veinImportChecked;
+        internal static readonly string[] VeinSettingKeys = {
+            nameof(VeinMiningEnabled), nameof(VeinMiningAutoLoot), nameof(VeinMiningRange), nameof(VeinMiningMaxBlocks),
+            nameof(VeinMiningCheckPickaxePower), nameof(VeinMiningMatchExactType), nameof(VeinMiningShowMessages),
+            nameof(DigSpeedBoost), nameof(AxeSpeedBoost), nameof(PlaceSpeedBoost)
+        };
+
+        public override int Version
+        {
+            get
+            {
+                // Core 会在加载迁移后立即保存。首次读取版本时保留保存前的导入状态。
+                if (!_veinImportChecked && ConfigManager.GetCurrentScope() == ConfigScope.Client && !string.IsNullOrEmpty(FilePath))
+                {
+                    _veinImportChecked = true;
+                    try
+                    {
+                        if (File.Exists(FilePath + ".vein-import.pending") || !File.Exists(FilePath)) NeedsVeinMinerImport = true;
+                        else
+                        {
+                            var raw = ConfigManager.ParseJsonRaw(File.ReadAllText(FilePath));
+                            NeedsVeinMinerImport = !raw.TryGetValue("_version", out object version) || Convert.ToInt32(version) < 3
+                                || VeinSettingKeys.Any(key => !raw.ContainsKey(key));
+                        }
+                        // 自动保存前落盘，导入失败／中断重启后仍能重试；不向配置面板添加状态项。
+                        if (NeedsVeinMinerImport) File.WriteAllText(FilePath + ".vein-import.pending", "3");
+                    }
+                    catch (Exception exception) { VeinImportStateError = exception.Message; }
+                }
+                return 3;
+            }
+        }
+
+        protected override void Migrate(Dictionary<string, object> raw, int oldVersion)
+        {
+            if (raw.TryGetValue("FastToolSpeed", out object speed) && speed is bool fast)
+            {
+                if (!raw.ContainsKey(nameof(DigSpeedBoost))) DigSpeedBoost = fast ? 1 : 0;
+                if (!raw.ContainsKey(nameof(AxeSpeedBoost))) AxeSpeedBoost = fast ? 1 : 0;
+                if (!raw.ContainsKey(nameof(PlaceSpeedBoost))) PlaceSpeedBoost = fast ? 1 : 0;
+            }
+            if (raw.TryGetValue(nameof(ExtraTileReach), out object reach) && reach is bool enabled)
+                ExtraTileReach = enabled ? 5 : 0;
+            if (raw.TryGetValue(nameof(UniversalPylons), out object pylons) && pylons is bool universal)
+            {
+                if (!raw.ContainsKey(nameof(PylonPlacementUnrestricted))) PylonPlacementUnrestricted = universal;
+                if (!raw.ContainsKey(nameof(PylonTeleportWithoutNearbyPlayer))) PylonTeleportWithoutNearbyPlayer = universal;
+                if (!raw.ContainsKey(nameof(PylonTeleportIgnoreDanger))) PylonTeleportIgnoreDanger = universal;
+                if (!raw.ContainsKey(nameof(PylonTeleportIgnoreBiome))) PylonTeleportIgnoreBiome = universal;
+            }
+        }
 
         // ================= 物品与收纳 =================
-        [Client]
+        [Server]
         [Label("物品最大堆叠")]
         [Description("将可堆叠物品的最大堆叠数量修改为9999（金钱除外）。")]
         public bool MaxStack9999 { get; set; } = true;
 
         [Client]
         [Label("无限药水增益")]
-        [Description("当背包或随身收纳中药水达到指定数量时，自动获得该药水的无限增益。")]
+        [Description("当背包、随身收纳或自己标记的箱子中药水达到指定数量时，自动获得该药水的无限增益。")]
         public bool InfinitePotions { get; set; } = true;
 
         [Client]
@@ -25,13 +82,28 @@ namespace QualityOfTerraria
         public int PotionStackRequirement { get; set; } = 30;
 
         [Client]
+        [Label("无限红药水增益")]
+        [Description("红药水达到所需数量时，获得原模组扩展的18种药水增益。特殊种子世界或开启随处可用时生效。")]
+        public bool InfiniteRedPotion { get; set; } = true;
+
+        [Client]
+        [Label("红药水随处可用")]
+        [Description("允许非特殊种子世界直接使用红药水获得原版正面增益，并允许无限红药水扩展。")]
+        public bool RedPotionEverywhere { get; set; } = true;
+
+        [Client]
+        [Label("无限红药水所需数量")]
+        [Range(1, 300)]
+        public int RedPotionRequirement { get; set; } = 20;
+
+        [Client]
         [Label("随身增益站与旗帜")]
-        [Description("背包或随身收纳中的增益站（灵视水晶球、施法桌、弹药箱、利刃站、蛋糕等）和敌怪旗帜随身生效。")]
+        [Description("背包、随身收纳或自己标记箱子中的增益站（灵视水晶球、施法桌、弹药箱、利刃站、蛋糕等）和敌怪旗帜随身生效。")]
         public bool InfiniteStationsAndBanners { get; set; } = true;
 
         [Client]
         [Label("便携制作站")]
-        [Description("背包及随身收纳中的制作台（工作台、熔炉、铁砧、炼金台、工匠作坊等）以及水桶/岩浆桶/蜂蜜桶随身生效。")]
+        [Description("背包、随身收纳或自己标记箱子中的制作台（工作台、熔炉、铁砧、炼金台、工匠作坊等）以及水桶/岩浆桶/蜂蜜桶随身生效。")]
         public bool PortableCraftingStations { get; set; } = true;
 
         [Client]
@@ -59,7 +131,7 @@ namespace QualityOfTerraria
         [Description("放置电线与促动器堆叠达到3996时不消耗。")]
         public bool InfiniteWire { get; set; } = true;
 
-        [Client]
+        [Server]
         [Label("任务鱼可堆叠")]
         [Description("渔夫任务鱼可无限堆叠（上限9999），且一天内允许垂钓多条任务鱼。")]
         public bool QuestFishStack { get; set; } = true;
@@ -92,14 +164,61 @@ namespace QualityOfTerraria
         public int ExtraGrabRange { get; set; } = 15;
 
         [Client]
-        [Label("工具与放置加速")]
-        [Description("提升工具挥舞、方块放置与墙壁粉刷速度。")]
-        public bool FastToolSpeed { get; set; } = true;
+        [Label("挖掘速度级别")]
+        [Range(0, 3)]
+        [Description("0、1、2、3分别为原版、2倍、3倍、4倍挖掘速度。")]
+        public int DigSpeedBoost { get; set; } = 2;
 
         [Client]
-        [Label("工具触及距离扩展")]
-        [Description("增加物块和工具的作用范围（手长+5格）。")]
-        public bool ExtraTileReach { get; set; } = true;
+        [Label("砍伐速度级别")]
+        [Range(0, 3)]
+        [Description("0、1、2、3分别为原版、2倍、3倍、4倍砍伐速度。")]
+        public int AxeSpeedBoost { get; set; } = 1;
+
+        [Client]
+        [Label("放置速度级别")]
+        [Range(0, 3)]
+        [Description("0、1、2、3分别为原版、2倍、3倍、4倍方块和墙壁放置速度。")]
+        public int PlaceSpeedBoost { get; set; } = 0;
+
+        [Client]
+        [Label("连锁挖矿")]
+        [Description("挖掘矿石时连锁开采相连矿石；V切换，按住Shift临时强制启用。")]
+        public bool VeinMiningEnabled { get; set; } = true;
+
+        [Client]
+        [Label("矿石自动入包")]
+        [Description("开采的矿石按原版拾取规则收进背包，背包满时保留地面掉落。")]
+        public bool VeinMiningAutoLoot { get; set; } = true;
+
+        [Client]
+        [Label("连锁挖矿范围（格）")]
+        [Range(1, 30)]
+        public int VeinMiningRange { get; set; } = 12;
+
+        [Client]
+        [Label("连锁挖矿最大数量")]
+        [Range(1, 500)]
+        public int VeinMiningMaxBlocks { get; set; } = 64;
+
+        [Client]
+        [Label("连锁挖矿检查镐力")]
+        [Description("连锁开采时检查所持工具镐力；关闭仍保留原版地形保护。")]
+        public bool VeinMiningCheckPickaxePower { get; set; } = true;
+
+        [Client]
+        [Label("连锁挖矿仅匹配同种矿石")]
+        public bool VeinMiningMatchExactType { get; set; } = true;
+
+        [Client]
+        [Label("连锁挖矿操作提示")]
+        public bool VeinMiningShowMessages { get; set; } = true;
+
+        [Client]
+        [Label("物块放置与工具触及距离增加量（格）")]
+        [Range(0, 30)]
+        [Description("在原版范围上增加指定格数，同时作用于物块放置与工具；0不扩展，默认5格。")]
+        public int ExtraTileReach { get; set; } = 5;
 
         [Client]
         [Label("魔镜 / 回程瞬传")]
@@ -122,11 +241,16 @@ namespace QualityOfTerraria
         public bool RespawnFullHealth { get; set; } = true;
 
         [Client]
-        [Label("快速复活")]
+        [Label("重生加速（非BOSS战）")]
         [Description("场上无 Boss 时复活时间缩短为 1.5 秒。")]
         public bool QuickRespawn { get; set; } = true;
 
         [Client]
+        [Label("重生加速（BOSS战）")]
+        [Description("BOSS战中复活时间独立缩短为1.5秒，不受非BOSS战开关影响。")]
+        public bool BossQuickRespawn { get; set; } = true;
+
+        [Server]
         [Label("禁用伤害浮动")]
         [Description("固定伤害输出，移除 85% ~ 115% 随机伤害波动。")]
         public bool NoDamageVariance { get; set; } = false;
@@ -136,7 +260,7 @@ namespace QualityOfTerraria
         [Description("炸弹、雷管、炸药等爆炸物不再对玩家自身造成伤害。")]
         public bool BombsNoPlayerDamage { get; set; } = true;
 
-        [Client]
+        [Server]
         [Label("敌怪爆炸物不破坏物块")]
         [Description("小丑炸弹等非玩家爆炸物不再炸毁物块。")]
         public bool DisableNonPlayerBombTileDamage { get; set; } = true;
@@ -152,20 +276,56 @@ namespace QualityOfTerraria
         public bool TeamUnconditionalTeleport { get; set; } = true;
 
         // ================= 世界与生态 =================
+        [Server]
         [Label("敌怪生成倍率")]
-        [Range(0, 30)]
+        [Range(0, 100)]
         [Description("调整生成频率和数量上限；0为和平模式，1为原版。联机由服务器配置。")]
         public float SpawnRateMultiplier { get; set; } = 1f;
 
-        [Client]
+        [Server]
         [Label("禁止邪恶群落蔓延")]
         [Description("彻底禁止腐化、猩红与神圣物块草皮自然扩散。")]
         public bool NoEvilSpread { get; set; } = true;
 
-        [Client]
-        [Label("全能晶塔")]
-        [Description("晶塔随时随地可传：无需靠近、无视NPC数量、战斗中无视危险、无视环境不匹配。")]
+        [Server]
+        [Label("晶塔传送无视NPC数量")]
+        [Description("保留旧全能晶塔的NPC数量豁免；其他晶塔限制由各自独立开关控制，联机由服务器执行。")]
         public bool UniversalPylons { get; set; } = true;
+
+        [Server]
+        [Label("晶塔放置无限制")]
+        [Description("允许放置多个相同类型的晶塔，仍需正常的放置空间。")]
+        public bool PylonPlacementUnrestricted { get; set; } = true;
+
+        [Server]
+        [Label("晶塔传送无需玩家在附近")]
+        public bool PylonTeleportWithoutNearbyPlayer { get; set; } = true;
+
+        [Server]
+        [Label("晶塔传送无视危险环境")]
+        [Description("兼容危险判定开关；Terraria 1.4.5.8原版晶塔传送已不检查战斗危险，此版本不额外改变该规则。")]
+        public bool PylonTeleportIgnoreDanger { get; set; } = true;
+
+        [Server]
+        [Label("晶塔传送无视生物群系")]
+        public bool PylonTeleportIgnoreBiome { get; set; } = true;
+
+        [Server]
+        [Label("敌人钱币掉落倍率")]
+        [Range(1, 25)]
+        [Description("服务器在敌怪实际钱币掉落计算时应用一次，不修改NPC基础价值；1为原版。")]
+        public int CoinDropMultiplier { get; set; } = 1;
+
+        [Server]
+        [Label("旗帜击杀要求数")]
+        [Range(1, 500)]
+        [Description("每达到指定击杀间隔获得一面可领取旗帜；保留真实击杀数和图鉴进度，默认50。")]
+        public int BannerKillRequirement { get; set; } = 50;
+
+        [Server]
+        [Label("旅商商店可刷新")]
+        [Description("旅商商店内允许申请刷新货物，服务器生成并同步。")]
+        public bool RefreshTravelShop { get; set; } = true;
 
         [Client]
         [Label("任意放床设重生点")]
@@ -177,43 +337,43 @@ namespace QualityOfTerraria
         [Description("随时可以上床睡觉，无视怪物接近、白天、事件或Boss战。")]
         public bool NoSleepRestrictions { get; set; } = true;
 
-        [Client]
+        [Server]
         [Label("睡觉时间加速倍率")]
         [Range(5, 50)]
         [Description("睡觉时游戏时间推进速度（原版为5倍，可提升至最高50倍）。")]
         public int BedTimeRate { get; set; } = 20;
 
-        [Client]
+        [Server]
         [Label("草药速生与随时开花")]
         [Description("草药生长速度大幅加快，且允许在任意时刻开花掉落种子。")]
         public bool FastHerbsAndBloom { get; set; } = true;
 
-        [Client]
+        [Server]
         [Label("再生之斧自动补种")]
         [Description("使用再生法杖或再生之斧收割成熟草药时自动补种种子。")]
         public bool StaffOfRegrowthReplant { get; set; } = true;
 
-        [Client]
+        [Server]
         [Label("树木速生与无视深度")]
         [Description("树苗极速生长为大树，且无视地下地层限制。")]
         public bool FastTreeGrowth { get; set; } = true;
 
-        [Client]
+        [Server]
         [Label("摇树必定掉落水果")]
         [Description("摇树时必定掉落对应的群落水果。")]
         public bool ShakeTreeAlwaysFruit { get; set; } = true;
 
-        [Client]
+        [Server]
         [Label("宝石树必定掉落宝石")]
         [Description("砍伐宝石树时必定掉落宝石。")]
         public bool GemTreeAlwaysGem { get; set; } = true;
 
-        [Client]
+        [Server]
         [Label("南瓜加速生长")]
         [Description("南瓜生长速度提升 5 倍。")]
         public bool FastPumpkinGrowth { get; set; } = true;
 
-        [Client]
+        [Server]
         [Label("生命果加速生长")]
         [Description("丛林生命果生成与生长速度加快。")]
         public bool FastLifeFruitGrowth { get; set; } = true;
@@ -224,27 +384,33 @@ namespace QualityOfTerraria
         public bool FastExtractinator { get; set; } = true;
 
         [Client]
+        [Label("自动钓鱼间隔（秒）")]
+        [Range(1, 60)]
+        [Description("自动钓鱼每次尝试之间的间隔，默认10秒。")]
+        public int AutoFishingIntervalSeconds { get; set; } = 10;
+
+        [Client]
         [Label("钓鱼无水池大小惩罚")]
         [Description("任意大小水池（包括极小池塘）均具备满渔力，不再受到渔力削弱。")]
         public bool NoFishingPenalty { get; set; } = true;
 
         // ================= NPC 与图鉴 =================
-        [Client]
+        [Server]
         [Label("城镇NPC免伤无敌")]
         [Description("城镇NPC免疫怪物、熔岩和环境伤害，不再意外阵亡。")]
         public bool TownNPCImmortal { get; set; } = true;
 
-        [Client]
+        [Server]
         [Label("城镇NPC极速复活")]
         [Description("城镇NPC阵亡后无需长时间等待，满足条件瞬间重新入住。")]
         public bool TownNPCFastSpawn { get; set; } = true;
 
-        [Client]
+        [Server]
         [Label("城镇NPC自动与夜晚入住")]
         [Description("哥布林、巫师、机械师等满足条件直接入住无需寻找；NPC可在夜晚入住。")]
         public bool TownNPCConvenientMoveIn { get; set; } = true;
 
-        [Client]
+        [Server]
         [Label("城镇NPC可住邪恶环境")]
         [Description("房屋处于腐化或猩红之地时依然判定为有效住房。")]
         public bool TownNPCLiveInEvil { get; set; } = true;
@@ -254,7 +420,7 @@ namespace QualityOfTerraria
         [Description("所有NPC买卖价格维持在最优惠区间（买东西75折最低价，永久出售晶塔）。")]
         public bool MaxNPCHappiness { get; set; } = true;
 
-        [Client]
+        [Server]
         [Label("旅商永不离开")]
         [Description("旅商入住后除非死亡不会离开世界。")]
         public bool TravellingMerchantStays { get; set; } = true;
@@ -269,7 +435,7 @@ namespace QualityOfTerraria
         [Description("发型师解锁游戏内所有发型供随意更换。")]
         public bool StylistUnlockAllHair { get; set; } = true;
 
-        [Client]
+        [Server]
         [Label("熔岩史莱姆不产生岩浆")]
         [Description("专家/大师模式下熔岩史莱姆死亡时不再生成熔岩。")]
         public bool LavalessLavaSlime { get; set; } = true;
@@ -277,8 +443,7 @@ namespace QualityOfTerraria
         // ================= 快捷工具与魔杖 =================
         [Client]
         [Label("建筑魔杖不消耗材料")]
-        [Description("快速放置和快速铺墙时不消耗背包材料。")]
+        [Description("快速放置时不消耗背包材料。")]
         public bool WandMaterialNoConsume { get; set; } = false;
     }
 }
-

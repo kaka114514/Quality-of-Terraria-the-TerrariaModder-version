@@ -18,6 +18,7 @@ namespace QualityOfTerraria.Patches
         {
             public static void Postfix(Player __instance, int i)
             {
+                if (StorageInventoryGuard.Locked) return;
                 if (Mod.Config == null || !Mod.Config.AutoSaveCoins || __instance == null || __instance.bank?.item == null)
                     return;
 
@@ -104,28 +105,31 @@ namespace QualityOfTerraria.Patches
                 }
 
                 // 消除伤害浮动 (原生支持，彻底避免对高频伤害函数进行拦截)
-                Terraria.Testing.DebugOptions.NoDamageVar = Mod.Config.NoDamageVariance;
+                if (Main.netMode != 1) Terraria.Testing.DebugOptions.NoDamageVar = Mod.Config.NoDamageVariance;
             }
         }
 
-        // UpdateEquips 在本帧工具使用前执行；原版随后将放置速度换算为时间倍率。
-        [HarmonyPatch(typeof(Player), nameof(Player.UpdateEquips))]
+        // 原版在此之前完成速度截断和放置时间换算，在工具使用前应用独立倍率。
+        [HarmonyPatch(typeof(Player), "CapAttackSpeeds")]
         public static class ToolStatsPatch
         {
             public static void Postfix(Player __instance)
             {
                 if (!Mod.WorldActive || Mod.Config == null || __instance == null || !__instance.active || __instance.whoAmI != Main.myPlayer)
                     return;
-                if (Mod.Config.ExtraTileReach)
+                var config = Networking.SettingsSync.GetPlayerConfig(__instance.whoAmI);
+                if (config == null) return;
+                if (config.ExtraTileReach > 0)
                 {
-                    Player.tileRangeX += 5;
-                    Player.tileRangeY += 5;
+                    Player.tileRangeX += Math.Min(30, config.ExtraTileReach);
+                    Player.tileRangeY += Math.Min(30, config.ExtraTileReach);
                 }
-                if (Mod.Config.FastToolSpeed)
+                if (Features.ToolSpeedSystem.SpeedActive)
                 {
-                    __instance.pickSpeed *= 0.5f;
-                    __instance.tileSpeed *= 2f;
-                    __instance.wallSpeed *= 2f;
+                    __instance.pickSpeed /= Features.ToolSpeedSystem.GetMultiplier(config.DigSpeedBoost);
+                    float placement = Features.ToolSpeedSystem.GetMultiplier(config.PlaceSpeedBoost);
+                    __instance.tileSpeed /= placement;
+                    __instance.wallSpeed /= placement;
                 }
             }
         }
@@ -135,12 +139,15 @@ namespace QualityOfTerraria.Patches
         {
             public static void Postfix(Player __instance, Item sItem)
             {
-                if (!Mod.WorldActive || Mod.Config == null || !Mod.Config.FastToolSpeed || __instance.whoAmI != Main.myPlayer || sItem == null)
+                if (!Mod.WorldActive || Mod.Config == null || !Features.ToolSpeedSystem.SpeedActive || __instance == null || __instance.whoAmI != Main.myPlayer || sItem == null)
                     return;
+                var config = Networking.SettingsSync.GetPlayerConfig(__instance.whoAmI);
+                if (config == null) return;
                 if (sItem.pick > 0 || sItem.axe > 0 || sItem.hammer > 0)
                 {
-                    __instance.itemAnimation = Math.Max(1, __instance.itemAnimation / 2);
-                    __instance.itemAnimationMax = Math.Max(1, __instance.itemAnimationMax / 2);
+                    float multiplier = Features.ToolSpeedSystem.GetMultiplier(sItem.pick > 0 || sItem.hammer > 0 ? config.DigSpeedBoost : config.AxeSpeedBoost);
+                    __instance.itemAnimation = Math.Max(1, (int)(__instance.itemAnimation / multiplier));
+                    __instance.itemAnimationMax = Math.Max(1, (int)(__instance.itemAnimationMax / multiplier));
                 }
             }
         }
@@ -153,9 +160,11 @@ namespace QualityOfTerraria.Patches
                 if (!Mod.WorldActive || Mod.Config == null || __instance == null || __instance.whoAmI != Main.myPlayer || sItem == null)
                     return;
                 // 镐由原版 pickSpeed 计算使用间隔；斧和锤走 ApplyItemTime。
-                if (Mod.Config.FastToolSpeed && (sItem.axe > 0 || sItem.hammer > 0))
+                var config = Networking.SettingsSync.GetPlayerConfig(__instance.whoAmI);
+                if (Features.ToolSpeedSystem.SpeedActive && config != null && sItem.pick <= 0 && (sItem.axe > 0 || sItem.hammer > 0))
                 {
-                    __instance.itemTime = Math.Max(1, __instance.itemTime / 2);
+                    float multiplier = Features.ToolSpeedSystem.GetMultiplier(sItem.hammer > 0 ? config.DigSpeedBoost : config.AxeSpeedBoost);
+                    __instance.itemTime = Math.Max(1, (int)(__instance.itemTime / multiplier));
                     __instance.itemTimeMax = __instance.itemTime;
                 }
                 if (!Mod.Config.InstantRecall || __instance.itemAnimation <= 0) return;
@@ -200,21 +209,16 @@ namespace QualityOfTerraria.Patches
         {
             public static void Postfix(ref int __result)
             {
-                if (Mod.Config != null && Mod.Config.QuickRespawn)
-                {
-                    // 若无 Boss 存活，设置为 90 帧 (1.5 秒)
-                    if (!AnyBossAlive())
-                    {
-                        __result = 90;
-                    }
-                }
+                if (Mod.Config != null && (AnyBossAlive() ? Mod.Config.BossQuickRespawn : Mod.Config.QuickRespawn))
+                    __result = 90;
             }
 
             private static bool AnyBossAlive()
             {
                 for (int i = 0; i < Main.maxNPCs; i++)
                 {
-                    if (Main.npc[i] != null && Main.npc[i].active && (Main.npc[i].boss || Main.npc[i].type == NPCID.EaterofWorldsHead))
+                    if (Main.npc[i] != null && Main.npc[i].active && (Main.npc[i].boss ||
+                        Main.npc[i].type == NPCID.EaterofWorldsHead || Main.npc[i].type == NPCID.EaterofWorldsBody || Main.npc[i].type == NPCID.EaterofWorldsTail))
                         return true;
                 }
                 return false;

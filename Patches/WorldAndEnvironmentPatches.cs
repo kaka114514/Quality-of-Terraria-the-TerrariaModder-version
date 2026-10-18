@@ -13,7 +13,7 @@ namespace QualityOfTerraria.Patches
         {
             public static bool Prefix(int i, int j, int dirt, int grass)
             {
-                if (Mod.Config != null && Mod.Config.NoEvilSpread)
+                if (Main.netMode != 1 && !WorldGen.generatingWorld && WorldFeaturePatches.NaturalUpdateDepth > 0 && Mod.Config != null && Mod.Config.NoEvilSpread)
                 {
                     if (grass == TileID.CorruptGrass || grass == TileID.CrimsonGrass ||
                         grass == TileID.HallowedGrass || grass == 661 || grass == 662)
@@ -31,7 +31,7 @@ namespace QualityOfTerraria.Patches
         {
             public static void Postfix(ref bool __result)
             {
-                if (Mod.Config != null && Mod.Config.UniversalPylons)
+                if (Mod.Config != null && Mod.Config.PylonTeleportWithoutNearbyPlayer)
                 {
                     __result = true; // 玩家无需靠近晶塔即可传送
                 }
@@ -44,7 +44,7 @@ namespace QualityOfTerraria.Patches
         {
             public static void Postfix(ref int __result)
             {
-                if (Mod.Config != null && Mod.Config.UniversalPylons)
+                if (Main.netMode != 1 && Mod.Config != null && Mod.Config.UniversalPylons)
                 {
                     __result = 0; // 晶塔传送无需任何 NPC
                 }
@@ -99,7 +99,7 @@ namespace QualityOfTerraria.Patches
         {
             public static void Postfix(ref bool __result)
             {
-                if (Mod.Config != null && Mod.Config.FastHerbsAndBloom)
+                if (Main.netMode != 1 && Mod.Config != null && Mod.Config.FastHerbsAndBloom)
                 {
                     __result = true; // 草药无论何时采摘均掉落种子
                 }

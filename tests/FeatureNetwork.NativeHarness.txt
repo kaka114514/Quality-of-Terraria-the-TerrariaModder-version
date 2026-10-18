@@ -1,0 +1,7 @@
+using System;using System.IO;using System.Reflection;using HarmonyLib;using QualityOfTerraria.Features;using QualityOfTerraria.Patches;
+public static class FeatureNativeHooks {
+ public static int Main(){string game="D:/App/Game/Steam/steamapps/common/Terraria";
+ AppDomain.CurrentDomain.AssemblyResolve+=(sender,args)=>{string name=new AssemblyName(args.Name).Name;foreach(string path in new[]{Path.Combine(game,name+".dll"),Path.Combine(game,name+".exe"),Path.Combine(game,"TerrariaModder/core",name+".dll"),Path.Combine(game,"TerrariaModder/core/deps",name+".dll"),"E:/Work/泰拉瑞亚更好的体验移植/lib/"+name+".dll"})if(File.Exists(path))return Assembly.LoadFrom(path);return null;};
+ return Run();}
+ static int Run(){var harmony=new Harmony("qot.features.native-check");int failed=0;Type[] patches={typeof(TownNPCPatches.DummyProjectileSourcePatch),typeof(TownNPCPatches.TownNPCImmortalPatch),typeof(TownNPCPatches.TargetDummyAIPatch),typeof(TownNPCPatches.TargetDummyDrawPatch),typeof(Autofisher.FishingStoragePatch)};foreach(Type patch in patches){try{var methods=harmony.CreateClassProcessor(patch).Patch();if(methods.Count==0)throw new Exception("未挂接入口");Console.WriteLine("PASS "+patch.Name);}catch(Exception e){failed++;Console.WriteLine("FAIL "+patch.Name+" "+e);}}Console.WriteLine("真实1.4.5.8 x86功能IL挂接: "+(patches.Length-failed)+"/"+patches.Length+"（未启动游戏）");return failed;}
+}

@@ -22,12 +22,26 @@ namespace QualityOfTerraria.UI
             RegisterDraw(BuffAndSpawnRateUI.PanelId, BuffAndSpawnRateUI.Draw);
             RegisterDraw(StructureLocatorUI.PanelId, StructureLocatorUI.Draw);
             RegisterDraw(HudOverlayId, DrawHUDOverlay);
+            RegisterDraw(TravelShopRefreshUI.PanelId, TravelShopRefreshUI.Draw);
             SuperVaultUI.Initialize();
         }
 
         private static void RegisterDraw(string id, Action draw)
         {
-            UIRenderer.RegisterPanelDraw(id, () => { if (CanRender) draw(); });
+            UIRenderer.RegisterPanelDraw(id, () => { if (CanRender) PreserveVanillaInput(draw); });
+        }
+
+        private static void PreserveVanillaInput(Action action)
+        {
+            Player player = Main.LocalPlayer;
+            bool preserve = !UIRenderer.IsBlocking;
+            bool mouseInterface = player.mouseInterface, blockMouse = Main.blockMouse;
+            try { action(); }
+            finally
+            {
+                // Core注销不存在／最后一个面板时会清全局输入状态；不能顺带清掉原版背包的悬停保护。
+                if (preserve) { player.mouseInterface |= mouseInterface; Main.blockMouse |= blockMouse; }
+            }
         }
 
         public static void UpdateAll()
@@ -40,11 +54,28 @@ namespace QualityOfTerraria.UI
                 return;
             }
             if (!_initialized) Initialize();
+            PreserveVanillaInput(UpdatePanels);
+        }
+
+        internal static void ClearClosedPanelBounds()
+        {
+            if (!ExtremeStorageUI.IsOpen) UIRenderer.UnregisterPanelBounds(ExtremeStorageUI.PanelId);
+            if (!SuperVaultUI.IsOpen) UIRenderer.UnregisterPanelBounds(SuperVaultUI.PanelId);
+            if (!PlayerStatsUI.IsOpen) UIRenderer.UnregisterPanelBounds(PlayerStatsUI.PanelId);
+            if (!BuffAndSpawnRateUI.IsOpen) UIRenderer.UnregisterPanelBounds(BuffAndSpawnRateUI.PanelId);
+            if (!StructureLocatorUI.IsOpen) UIRenderer.UnregisterPanelBounds(StructureLocatorUI.PanelId);
+            if (!TravelShopRefreshUI.Visible) UIRenderer.UnregisterPanelBounds(TravelShopRefreshUI.PanelId);
+        }
+
+        private static void UpdatePanels()
+        {
             ExtremeStorageUI.Update();
             SuperVaultUI.Update();
             PlayerStatsUI.Update();
             BuffAndSpawnRateUI.Update();
             StructureLocatorUI.Update();
+            TravelShopRefreshUI.Update();
+            StructureMapMarker.EnsureRegistered();
             StructureLocator.Update();
             WandsAndTools.UpdateQuickPlace();
             WandsAndTools.UpdateLiquidWand();
@@ -59,6 +90,7 @@ namespace QualityOfTerraria.UI
             PlayerStatsUI.ResetSession();
             BuffAndSpawnRateUI.ResetSession();
             StructureLocatorUI.ResetSession();
+            TravelShopRefreshUI.ResetSession();
             WandsAndTools.ResetSession();
             Autofisher.ResetSession();
             TargetDummySystem.ResetSession();
@@ -76,6 +108,7 @@ namespace QualityOfTerraria.UI
             UIRenderer.UnregisterPanelDraw(BuffAndSpawnRateUI.PanelId);
             UIRenderer.UnregisterPanelDraw(StructureLocatorUI.PanelId);
             UIRenderer.UnregisterPanelDraw(HudOverlayId);
+            UIRenderer.UnregisterPanelDraw(TravelShopRefreshUI.PanelId);
             _initialized = false;
         }
 

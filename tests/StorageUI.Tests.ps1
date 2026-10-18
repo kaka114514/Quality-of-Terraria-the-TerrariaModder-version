@@ -11,12 +11,12 @@ function Part([string]$signature) {
     }
     $source.Substring($start, $end - $start)
 }
-$methods = @('private static void AdjustLayout()', 'private static void ApplySorting()', 'private static bool MatchesTab(', 'private static bool IsFurniture(', 'private static string GetSortModeDisplayName(', 'private static void DrawItemGrid(', 'private static void DrawBottomToolbar(', 'public static void Draw()', 'private static void DrawChestManagerPage(', 'private static void DrawSettingsPage(', 'private static void SortChests()') | ForEach-Object { Part $_ }
+$methods = @('private static void AdjustLayout()', 'private static void ApplySorting()', 'private static bool MatchesTab(', 'private static bool IsFurniture(', 'private static string GetSortModeDisplayName(', 'private static void UpdateStorageActionState()', 'private static bool BeginStorageAction(', 'private static void ArmStorageActionCooldown()', 'private static void DrawItemGrid(', 'private static void DrawBottomToolbar(', 'public static void Draw()', 'private static void DrawChestManagerPage(', 'private static void DrawSettingsPage(', 'private static void SortChests()') | ForEach-Object { Part $_ }
 foreach ($optional in @('private static int CompareItems(', 'private static int GetItemKind(', 'private static bool DrawButton(')) {
     if ($source.Contains($optional)) { $methods += Part $optional }
 }
 $stateStart = $source.IndexOf('private static int _contentY')
-$state = $source.Substring($stateStart, $source.IndexOf('private static void AdjustLayout()', $stateStart) - $stateStart)
+$state = $source.Substring($stateStart, $source.IndexOf('private static void AdjustLayout()', $stateStart) - $stateStart) + "`nprivate static bool _storageActionHeld;`nprivate static int _storageActionNeutralFrames;`nprivate static ulong _storageActionCooldownUntil;`nprivate const ulong StorageActionCooldownFrames = 30;"
 $footerCall = [regex]::Match($source, 'DrawBottomToolbar\(PanelX \+ 16,[^;]+;').Value
 $constants = @()
 foreach ($idType in @('ItemID', 'TileID')) {
@@ -37,8 +37,10 @@ public class Item {
 }
 public class Player { public bool mouseInterface; }
 public class Chest { public int x,y; public bool Marked=true; public string name=""; public Item[] item=new Item[40]; }
-public static class Main { public static Player[] player={new Player()}; public static Player LocalPlayer=player[0]; public static int myPlayer,netMode,maxChests=2; public static Item mouseItem; public static Chest[] chest={new Chest(),new Chest()}; public static bool mouseLeft,mouseLeftRelease; }
+public static class Main { public static Player[] player={new Player()}; public static Player LocalPlayer=player[0]; public static int myPlayer,netMode,maxChests=2; public static ulong GameUpdateCount; public static Item mouseItem; public static Chest[] chest={new Chest(),new Chest()}; public static bool mouseLeft,mouseRight,mouseLeftRelease; }
 public static class SoundEngine { public static void PlaySound(int id) {} }
+public static class RemoteStorageOperations { public static string Status = "服务器已确认"; public static bool RequestOpenChest(int index) { return true; } }
+public static class Patches { public static class StorageInventoryGuard { public static bool Locked; } }
 public static class SoundID { public const int Grab=1, MenuTick=2; }
 public static class MessageID { public const int SyncChestItem=1; }
 public static class NetMessage { public static void SendData(params object[] values) {} }
@@ -80,7 +82,7 @@ public static class StorageUIRegression {
  __STATE__
  __METHODS__
  private static bool PutItemIntoAnyChest(Item item) { return false; }
- private static void TakeItemToPlayer(ItemSlotRef slot,bool takeAll) {}
+ private static bool TakeItemToPlayer(ItemSlotRef slot,bool takeAll) { return false; }
  private static void DrawItemTooltip(Item item,ItemSlotRef slot,int x,int y) {}
  private static void RefreshItems() {} private static void HandleToolbarAction(int i) {}
  private static void Toggle() {} private static void MarkAllChests() {} private static void ClearAllMarkedChests() {} private static void MarkNearbyChests(float range) {} private static void ToggleMarkChest(Chest chest) {}
@@ -134,6 +136,10 @@ public static class StorageUIRegression {
    }
   }
   PanelLayout.ScreenWidth=780; PanelLayout.ScreenHeight=580; CurrentTab=StorageTab.All; AdjustLayout();
+  Main.mouseLeft=true; UIRenderer.MouseLeftClick=true; Check(BeginStorageAction(), "首次按下左键可提交存储操作");
+  UIRenderer.MouseLeftClick=true; Check(!BeginStorageAction(), "按住左键不会重复提交存储操作");
+  Main.mouseLeft=false; Main.mouseRight=false; UIRenderer.MouseLeftClick=false; UIRenderer.MouseRightClick=false; UpdateStorageActionState();
+  Main.mouseLeft=true; UIRenderer.MouseLeftClick=true; Check(BeginStorageAction(), "松开后再次按下左键可提交下一次存储操作");
   UIRenderer.MouseX=PanelX+PanelWidth-170; UIRenderer.MouseY=PanelY+10; UIRenderer.MouseLeftClick=true; Draw();
   Check(CurrentTab==StorageTab.ChestManager && !_isDragging, "标题箱子管理按钮可点击且不触发拖动");
   UIRenderer.MouseX=PanelX+PanelWidth-80; UIRenderer.MouseLeftClick=true; Draw();

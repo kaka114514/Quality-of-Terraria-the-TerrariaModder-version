@@ -93,7 +93,9 @@ namespace QualityOfTerraria.Patches
                 if (c != null && c.Length > 0)
                 {
                     fruit = c[Main.rand.Next(c.Length)];
+#pragma warning disable CS0618 // 类型或成员已过时
                     Item.NewItem(WorldGen.GetItemSource_FromTreeShake(x, y), x * 16, y * 16, 16, 16, fruit);
+#pragma warning restore CS0618
                 }
             }
         }
