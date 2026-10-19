@@ -6,6 +6,7 @@ using Terraria;
 using Terraria.Audio;
 using Terraria.ID;
 using Terraria.UI;
+using QualityOfTerraria.UI;
 
 namespace QualityOfTerraria.Patches
 {
@@ -102,33 +103,11 @@ namespace QualityOfTerraria.Patches
             }
         }
 
-        // 3. 哥布林重铸历史记录与右键回滚
-        // 记录物品与其曾经获得的词缀列表
-        private static readonly Dictionary<string, List<byte>> _prefixHistory = new Dictionary<string, List<byte>>();
-        private static readonly Dictionary<string, int> _historyIndex = new Dictionary<string, int>();
-
-        private static string GetItemKey(Item item)
-        {
-            return $"{item.type}_{item.favorited}";
-        }
-
+        // 3. 哥布林重铸历史记录（使用 UI 按钮回滚）
         // 监测重铸发生 (context 5 为重铸槽)
         [HarmonyPatch(typeof(ItemSlot), nameof(ItemSlot.LeftClick), typeof(Item[]), typeof(int), typeof(int))]
         public static class ReforgeRecordPatch
         {
-            private static byte _prevPrefix;
-
-            public static void Prefix(Item[] inv, int context, int slot)
-            {
-                if (Mod.Config == null || !Mod.Config.ImprovePrefix)
-                    return;
-
-                if (context == 5 && !Main.reforgeItem.IsAir)
-                {
-                    _prevPrefix = Main.reforgeItem.prefix;
-                }
-            }
-
             public static void Postfix(Item[] inv, int context, int slot)
             {
                 if (Mod.Config == null || !Mod.Config.ImprovePrefix)
@@ -136,54 +115,9 @@ namespace QualityOfTerraria.Patches
 
                 if (context == 5 && !Main.reforgeItem.IsAir)
                 {
-                    string key = GetItemKey(Main.reforgeItem);
-                    if (!_prefixHistory.ContainsKey(key))
-                    {
-                        _prefixHistory[key] = new List<byte>();
-                    }
-
-                    if (_prevPrefix > 0 && !_prefixHistory[key].Contains(_prevPrefix))
-                    {
-                        _prefixHistory[key].Add(_prevPrefix);
-                    }
-
-                    if (Main.reforgeItem.prefix > 0 && !_prefixHistory[key].Contains(Main.reforgeItem.prefix))
-                    {
-                        _prefixHistory[key].Add(Main.reforgeItem.prefix);
-                    }
+                    // 将记录逻辑委托给 UI 组件
+                    ReforgeRollbackUI.RecordPrefix(Main.reforgeItem);
                 }
-            }
-        }
-
-        // 右键重铸槽回滚到上一个词缀
-        [HarmonyPatch(typeof(ItemSlot), nameof(ItemSlot.RightClick), typeof(Item[]), typeof(int), typeof(int))]
-        public static class ReforgeRollbackPatch
-        {
-            public static bool Prefix(Item[] inv, int context, int slot)
-            {
-                if (Mod.Config == null || !Mod.Config.ImprovePrefix)
-                    return true;
-
-                if (context == 5 && !Main.reforgeItem.IsAir)
-                {
-                    string key = GetItemKey(Main.reforgeItem);
-                    if (_prefixHistory.ContainsKey(key) && _prefixHistory[key].Count > 1)
-                    {
-                        List<byte> list = _prefixHistory[key];
-                        if (!_historyIndex.ContainsKey(key))
-                            _historyIndex[key] = list.IndexOf(Main.reforgeItem.prefix);
-
-                        int idx = (_historyIndex[key] - 1 + list.Count) % list.Count;
-                        _historyIndex[key] = idx;
-                        byte targetPrefix = list[idx];
-
-                        Main.reforgeItem.Prefix(targetPrefix);
-                        SoundEngine.PlaySound(SoundID.Item37);
-                        Main.NewText($"[可追溯重铸] 已回滚词缀至: {Lang.prefix[targetPrefix].Value}", 100, 240, 255);
-                        return false; // 拦截默认右键
-                    }
-                }
-                return true;
             }
         }
 

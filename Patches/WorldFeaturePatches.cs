@@ -118,35 +118,6 @@ namespace QualityOfTerraria.Patches
                 if (count != 1) throw new InvalidOperationException("未找到1.4.5.8敌怪钱币掉落唯一基础价值读取。");
             }
         }
-
-        internal static int BannerRequirement(int original)
-        {
-            return Main.netMode == 1 || Mod.Config == null ? original : Math.Max(1, Math.Min(500, Mod.Config.BannerKillRequirement));
-        }
-
-        // 1.4.5旗帜通过原版领取系统发放，保留AddKill和原版同步，不直接生成第二面旗帜。
-        [HarmonyPatch(typeof(BannerSystem), "AddNPCKillBy")]
-        public static class BannerRequirementPatch
-        {
-            public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
-            {
-                List<CodeInstruction> code = new List<CodeInstruction>(instructions);
-                FieldInfo requirements = AccessTools.Field(typeof(ItemID.Sets), nameof(ItemID.Sets.KillsToBanner));
-                int count = 0;
-                for (int i = 0; i < code.Count; i++)
-                {
-                    if (!code[i].LoadsField(requirements)) continue;
-                    // 原版 KillsToBanner[BannerToItem(banner)] 在 ldelem.i4 后得到需求数。
-                    if (i + 3 >= code.Count || code[i + 3].opcode != OpCodes.Ldelem_I4)
-                        throw new InvalidOperationException("1.4.5.8旗帜需求数组读取结构已改变。");
-                    code.Insert(i + 4, new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(WorldFeaturePatches), nameof(BannerRequirement))));
-                    count++;
-                    i += 4;
-                }
-                if (count != 1) throw new InvalidOperationException("未找到1.4.5.8唯一旗帜掉落间隔读取。");
-                return code;
-            }
-        }
     }
 
     internal static class WorldFeatureActions

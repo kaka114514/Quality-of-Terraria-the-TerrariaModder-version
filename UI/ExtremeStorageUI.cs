@@ -1452,7 +1452,7 @@ namespace QualityOfTerraria.UI
                 "箱内合成：已接入原版材料读取、扣除与联机确认",
                 "无限药水：" + (config?.InfinitePotions == true ? "开启" : "关闭") + "，每组至少 " + (config?.PotionStackRequirement ?? 30) + " 瓶",
                 "便携制作站：" + (config?.PortableCraftingStations == true ? "开启" : "关闭"),
-                "增益站与怪物旗帜：" + (config?.InfiniteStationsAndBanners == true ? "开启" : "关闭"),
+                "增益站：" + (config?.InfiniteStationsAndBanners == true ? "开启" : "关闭"),
                 Main.netMode == 1 ? "联机：全世界标记箱子可远程存取；由服务器确认" : "单人：已标记且未锁/未占用的箱子参与存取与合成",
                 !_canSave ? "标记存档无法恢复：本会话标记不会保存，请查看日志" : Main.netMode == 1 ? RemoteStorageOperations.Status : "物品来源：个人存储、大背包和已标记箱子"
             };

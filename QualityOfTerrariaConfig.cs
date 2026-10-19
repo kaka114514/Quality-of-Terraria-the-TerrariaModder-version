@@ -65,10 +65,6 @@ namespace QualityOfTerraria
         }
 
         // ================= 物品与收纳 =================
-        [Server]
-        [Label("物品最大堆叠")]
-        [Description("将可堆叠物品的最大堆叠数量修改为9999（金钱除外）。")]
-        public bool MaxStack9999 { get; set; } = true;
 
         [Client]
         [Label("无限药水增益")]
@@ -97,8 +93,8 @@ namespace QualityOfTerraria
         public int RedPotionRequirement { get; set; } = 20;
 
         [Client]
-        [Label("随身增益站与旗帜")]
-        [Description("背包、随身收纳或自己标记箱子中的增益站（灵视水晶球、施法桌、弹药箱、利刃站、蛋糕等）和敌怪旗帜随身生效。")]
+        [Label("随身增益站")]
+        [Description("背包、随身收纳或自己标记箱子中的增益站（灵视水晶球、施法桌、弹药箱、利刃站、蛋糕等）随身生效。")]
         public bool InfiniteStationsAndBanners { get; set; } = true;
 
         [Client]
@@ -130,11 +126,6 @@ namespace QualityOfTerraria
         [Label("无限电线与促动器")]
         [Description("放置电线与促动器堆叠达到3996时不消耗。")]
         public bool InfiniteWire { get; set; } = true;
-
-        [Server]
-        [Label("任务鱼可堆叠")]
-        [Description("渔夫任务鱼可无限堆叠（上限9999），且一天内允许垂钓多条任务鱼。")]
-        public bool QuestFishStack { get; set; } = true;
 
         [Client]
         [Label("渔夫任务即时刷新")]
@@ -315,12 +306,6 @@ namespace QualityOfTerraria
         [Range(1, 25)]
         [Description("服务器在敌怪实际钱币掉落计算时应用一次，不修改NPC基础价值；1为原版。")]
         public int CoinDropMultiplier { get; set; } = 1;
-
-        [Server]
-        [Label("旗帜击杀要求数")]
-        [Range(1, 500)]
-        [Description("每达到指定击杀间隔获得一面可领取旗帜；保留真实击杀数和图鉴进度，默认50。")]
-        public int BannerKillRequirement { get; set; } = 50;
 
         [Server]
         [Label("旅商商店可刷新")]

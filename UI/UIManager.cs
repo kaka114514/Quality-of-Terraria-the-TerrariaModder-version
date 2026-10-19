@@ -23,6 +23,7 @@ namespace QualityOfTerraria.UI
             RegisterDraw(StructureLocatorUI.PanelId, StructureLocatorUI.Draw);
             RegisterDraw(HudOverlayId, DrawHUDOverlay);
             RegisterDraw(TravelShopRefreshUI.PanelId, TravelShopRefreshUI.Draw);
+            RegisterDraw(ReforgeRollbackUI.PanelId, ReforgeRollbackUI.Draw);
             SuperVaultUI.Initialize();
         }
 
@@ -65,6 +66,7 @@ namespace QualityOfTerraria.UI
             if (!BuffAndSpawnRateUI.IsOpen) UIRenderer.UnregisterPanelBounds(BuffAndSpawnRateUI.PanelId);
             if (!StructureLocatorUI.IsOpen) UIRenderer.UnregisterPanelBounds(StructureLocatorUI.PanelId);
             if (!TravelShopRefreshUI.Visible) UIRenderer.UnregisterPanelBounds(TravelShopRefreshUI.PanelId);
+            if (!ReforgeRollbackUI.Visible) UIRenderer.UnregisterPanelBounds(ReforgeRollbackUI.PanelId);
         }
 
         private static void UpdatePanels()
@@ -75,6 +77,7 @@ namespace QualityOfTerraria.UI
             BuffAndSpawnRateUI.Update();
             StructureLocatorUI.Update();
             TravelShopRefreshUI.Update();
+            ReforgeRollbackUI.Update();
             StructureMapMarker.EnsureRegistered();
             StructureLocator.Update();
             WandsAndTools.UpdateQuickPlace();
@@ -91,6 +94,7 @@ namespace QualityOfTerraria.UI
             BuffAndSpawnRateUI.ResetSession();
             StructureLocatorUI.ResetSession();
             TravelShopRefreshUI.ResetSession();
+            ReforgeRollbackUI.ResetSession();
             WandsAndTools.ResetSession();
             Autofisher.ResetSession();
             TargetDummySystem.ResetSession();
@@ -109,6 +113,7 @@ namespace QualityOfTerraria.UI
             UIRenderer.UnregisterPanelDraw(StructureLocatorUI.PanelId);
             UIRenderer.UnregisterPanelDraw(HudOverlayId);
             UIRenderer.UnregisterPanelDraw(TravelShopRefreshUI.PanelId);
+            UIRenderer.UnregisterPanelDraw(ReforgeRollbackUI.PanelId);
             _initialized = false;
         }
 

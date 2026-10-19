@@ -179,28 +179,7 @@ namespace QualityOfTerraria.Patches
             }
         }
 
-        // 4. 允许钓出多条任务鱼 (绕过背包已有任务鱼的检查)
-
-        // 允许钓出多条任务鱼 (绕过背包已有任务鱼的检查)
-        [HarmonyPatch(typeof(Projectile), "FishingCheck_ProbeForQuestFish")]
-        public static class ProbeForQuestFishPatch
-        {
-            public static void Postfix(Projectile __instance, ref FishingAttempt fisher)
-            {
-                if (Mod.Config != null && Mod.Config.QuestFishStack)
-                {
-                    if (Main.anglerQuestItemNetIDs != null && Main.anglerQuest >= 0 && Main.anglerQuest < Main.anglerQuestItemNetIDs.Length)
-                    {
-                        if (NPC.AnyNPCs(NPCID.Angler) && !Main.anglerQuestFinished)
-                        {
-                            fisher.questFish = Main.anglerQuestItemNetIDs[Main.anglerQuest];
-                        }
-                    }
-                }
-            }
-        }
-
-        // 5. 渔夫任务即时重置 (无需等隔天)
+        // 渔夫任务即时重置 (无需等隔天)
         [HarmonyPatch(typeof(Main), "UpdateTime")]
         public static class AnglerQuestResetPatch
         {
