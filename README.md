@@ -1,5 +1,7 @@
 # Quality of Terraria 更好的体验
 
+基于[更好的体验(ImproveGame)](https://github.com/487666123/ImproveGame)的泰拉瑞亚模组。
+
 **移植版本**：适配 TerrariaModder v0.4.1+  
 **原版作者**：487666123  
 **当前版本**：v1.1.2  
