@@ -11,7 +11,7 @@
 
 ## 📖 简介
 
-基于 tModLoader 平台热门 MOD [更好的体验(ImproveGame)](https://github.com/487666123/ImproveGame) 移植到 TerrariaModder 平台的版本。本模组专注于生活品质（Quality of Life）改进，提供大量便捷功能，让玩家能够更流畅地享受游戏，而不改变核心玩法。
+基于 tModLoader 平台热门 MOD [更好的体验(ImproveGame)](https://github.com/487666123/ImproveGame) 移植到 TerrariaModder 平台的版本。提供大量便捷功能，让玩家能够更流畅地享受游戏，而不改变核心玩法。
 
 **核心特性**：
 
