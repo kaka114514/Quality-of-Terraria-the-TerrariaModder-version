@@ -147,7 +147,8 @@ namespace QualityOfTerraria.UI
             return RemoteStorageSnapshots.GetChest(index);
         }
 
-        private static Chest GetChestMetadata(int index) => GetChestForRead(index) ?? Main.chest?[index];
+        internal static Chest GetChestMetadata(int index)
+            => index < 0 || index >= Main.maxChests ? null : GetChestForRead(index) ?? Main.chest?[index];
 
         public static bool CanMutateChest(int index)
         {
@@ -168,30 +169,9 @@ namespace QualityOfTerraria.UI
             _loadedWorldName = world + "." + owner;
             string directory = Path.Combine(Main.SavePath, "TerrariaModder", "world-data");
             _loadedPath = Path.Combine(directory, _loadedWorldName + ".markedchests.dat");
-            string legacy = Path.Combine(directory, world + ".markedchests.dat");
-            if (!File.Exists(_loadedPath) && !File.Exists(_loadedPath + ".bak") && (File.Exists(legacy) || File.Exists(legacy + ".bak")))
-            {
-                // 旧世界共用文件只迁给首次认领的玩家，后来换角色／身份不能自动继承。
-                try
-                {
-                    bool owns = false;
-                    string claim = legacy + ".owner";
-                    try
-                    {
-                        using (var stream = new FileStream(claim, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-                        using (var writer = new StreamWriter(stream)) { writer.Write(owner); writer.Flush(); stream.Flush(true); }
-                        owns = true;
-                    }
-                    catch (IOException) { owns = File.Exists(claim) && File.ReadAllText(claim) == owner; }
-                    if (owns)
-                    {
-                        if (File.Exists(legacy)) File.Copy(legacy, _loadedPath, false);
-                        if (File.Exists(legacy + ".bak")) File.Copy(legacy + ".bak", _loadedPath + ".bak", false);
-                    }
-                }
-                catch (Exception error) { Mod.LogError("迁移当前玩家的旧箱子标记失败", error); }
-            }
-            LoadMarkedChests();
+            // 服务器按角色持久化；旧本地缓存不能复活已取消的标记。
+            _markedChests.Clear();
+            _canSave = true;
             _markedChests.UnionWith(marks);
             SaveMarkedChests();
             RemoteStorageSnapshots.Initialize();

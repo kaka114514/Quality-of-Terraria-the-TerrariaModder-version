@@ -13,6 +13,10 @@
 
 ## 回归检查
 
+非房主终极存储回归（2026-10-20）：构建客户端后运行 `pwsh -NoProfile -File tests/RemoteStorage.NonHost.Tests.ps1`。脚本编译 x86 测试程序，使用本机真实 Terraria/Core 和生产 DLL，覆盖普通玩家握手、标记保存、快照物品、远程打开，以及身份、令牌、锁箱和占用保护；网络发送与界面输出被测试捕获，不启动游戏。测试数据仅写入 `bin/nonhost-tests/`。该检查不替代两台实际客户端联机验收。`tests/` 是本地保留文件，不随 GitHub 源码分发。
+
+角色隔离回归也包含在上述脚本中：同安装 ID 的两个角色独立增删、旧列表一次性复制、清空服务端会话后从磁盘恢复、换槽位／安装 ID、空列表不重复迁移、旧客户端缓存不覆盖服务器，以及角色 ID 文件持久化、改名和新角色复用文件名。云端切换只验证 Harmony 挂接，Steam 云端实际读写仍需游戏验收。
+
 `tests/` 中的游戏、Core、Harmony、Mono.Cecil及SDK路径需要按本机安装位置调整。多数脚本可在 PowerShell 7 中执行；依赖真实XNA／Core运行时的脚本使用32位 Windows PowerShell。测试生成物放在忽略的 `bin/` 下，不随发布包分发。
 
 Core 0.4.1 的 `NetSync` 字符串字段单包上限为 255 字节。长 Base64 载荷统一经过 `Networking/NetSyncPayload.cs` 分片与重组，终极存储、工具、连锁挖矿、结构定位和设置同步不得直接调用底层存取方法。分片回归使用 `tests/NetSyncPayload.Tests.ps1`。

@@ -16,7 +16,7 @@ namespace QualityOfTerraria.Networking
         private sealed class Peer
         {
             internal Player Player;
-            internal string Identity, Hello, Token;
+            internal string Identity, CharacterId, Hello, Token;
             internal long LastSequence;
             internal long LastMarkSequence;
             internal string LastMarkRequest, LastMarkReply;
@@ -68,7 +68,7 @@ namespace QualityOfTerraria.Networking
         private static int _lifecycle;
         private static Action<int, string, string> _receiveRequest;
         private static Action<bool, string, string> _receiveResponse;
-        private static string _hello, _token, _world, _pending, _markPending, _openPending;
+        private static string _hello, _characterId, _token, _world, _pending, _markPending, _openPending;
         private static string _receivingToken, _receivingWorld, _receivingOwner;
         private static int _receivingParts;
         private static State[] _before;
@@ -96,6 +96,8 @@ namespace QualityOfTerraria.Networking
             if (Main.netMode != 2)
             {
                 var file = Main.ActivePlayerFileData;
+                try { _characterId = StorageCharacterIdentity.GetOrCreate(file); }
+                catch (Exception error) { Status = error.Message; Mod.LogError("读取角色箱子标记身份失败", error); }
                 StorageTransactionJournal.InitializeClient(file == null || string.IsNullOrEmpty(file.Path) ? null :
                     (file.IsCloudSave ? "cloud:" : "local:") + file.Path);
                 if (StorageTransactionJournal.ClientLocked) Status = StorageTransactionJournal.Status;
@@ -149,9 +151,10 @@ namespace QualityOfTerraria.Networking
             if (_remoteChest >= 0 && Main.LocalPlayer.chest != _remoteChest) _remoteChest = -1;
             if (!Ready)
             {
+                if (_characterId == null) return;
                 if (_lastHello != 0 && Main.GameUpdateCount - _lastHello < 120) return;
                 _lastHello = Main.GameUpdateCount;
-                NetSyncPayload.SendRequest(Prefix + "hello", _hello);
+                NetSyncPayload.SendRequest(Prefix + "hello", _hello + "|" + _characterId);
                 return;
             }
             if (_markPending != null && Main.GameUpdateCount - _lastMarks >= 180)
@@ -205,8 +208,14 @@ namespace QualityOfTerraria.Networking
         {
             peer = null;
             return Main.netMode == 2 && client >= 0 && client < Main.maxPlayers && Main.player[client].active &&
-                PermissionService.HasModAccess(client, "quality-of-terraria") && Peers.TryGetValue(client, out peer) &&
+                Peers.TryGetValue(client, out peer) &&
                 ReferenceEquals(peer.Player, Main.player[client]) && peer.Identity == PermissionService.GetGuid(client);
+        }
+
+        internal static string GetCharacterId(int client)
+        {
+            Peer peer;
+            return ValidPeer(client, out peer) ? peer.CharacterId : null;
         }
 
         private static void HandleRequest(int client, string operation, string payload)
@@ -234,15 +243,19 @@ namespace QualityOfTerraria.Networking
 
         private static void Hello(int client, string hello)
         {
-            Guid nonce;
-            if (!Guid.TryParseExact(hello, "N", out nonce) || !PermissionService.HasModAccess(client, "quality-of-terraria")) return;
+            Guid nonce, character;
+            // 个人标记箱是普通玩家功能；HasModAccess 代表管理员/显式授权，不能用作连接身份检查。
+            if (hello == null || hello.Length != 65 || hello[32] != '|' ||
+                !Guid.TryParseExact(hello.Substring(0, 32), "N", out nonce) ||
+                !Guid.TryParseExact(hello.Substring(33), "N", out character) || character == Guid.Empty) return;
+            string characterId = character.ToString("N");
             string identity = PermissionService.GetGuid(client), world = ServerMarkedChests.WorldIdentity;
             if (string.IsNullOrEmpty(identity) || string.IsNullOrEmpty(world) || world == Guid.Empty.ToString("N")) return;
             StorageTransactionJournal.InitializeServer(world);
             Peer peer;
             if (!Peers.TryGetValue(client, out peer) || !ReferenceEquals(peer.Player, Main.player[client]) || peer.Identity != identity || peer.Hello != hello)
             {
-                peer = new Peer { Player = Main.player[client], Identity = identity, Hello = hello, Token = Guid.NewGuid().ToString("N") };
+                peer = new Peer { Player = Main.player[client], Identity = identity, CharacterId = characterId, Hello = hello, Token = Guid.NewGuid().ToString("N") };
                 Peers[client] = peer;
             }
             StorageTransactionJournal.RegisterServerToken(identity, peer.Token);
@@ -253,7 +266,7 @@ namespace QualityOfTerraria.Networking
                 int offset = part * 128, count = Math.Min(128, marks.Length - offset), number = part;
                 NetSyncPayload.SendResponseTo(client, true, Prefix + "hello", Encode(writer =>
                 {
-                    writer.Write(hello); writer.Write(peer.Token); writer.Write(world); writer.Write(StoragePersistence.Identity(peer.Identity));
+                    writer.Write(hello.Substring(0, 32)); writer.Write(peer.Token); writer.Write(world); writer.Write(StoragePersistence.Identity("character:" + peer.CharacterId));
                     writer.Write(number); writer.Write(parts); writer.Write(count);
                     for (int i = 0; i < count; i++) writer.Write(marks[offset + i]);
                 }));
@@ -301,8 +314,9 @@ namespace QualityOfTerraria.Networking
             => Request(all ? 0 : 1, chest, slot, expected);
         internal static bool RequestOpenChest(int index)
         {
-            Chest chest = ExtremeStorageUI.GetChestForRead(index);
-            if (chest == null || !ExtremeStorageUI.IsChestMarked(chest)) { Main.NewText("请先标记箱子并等待服务器确认内容。", 255, 210, 120); return false; }
+            // 打开请求只需坐标；箱子内容和可访问性由服务器在 Open 中核验并返回。
+            Chest chest = ExtremeStorageUI.GetChestMetadata(index);
+            if (chest == null || !ExtremeStorageUI.IsChestMarked(chest)) { Main.NewText("请先标记箱子。", 255, 210, 120); return false; }
             if (Main.netMode == 0)
             {
                 if (!ExtremeStorageUI.CanMutateChest(index)) return false;
@@ -784,7 +798,7 @@ namespace QualityOfTerraria.Networking
             if (_initialized) { NetSync.OnStorageRequest -= _receiveRequest; NetSync.OnStorageResponse -= _receiveResponse; }
             _initialized = false; _lifecycle++;
             Peers.Clear(); ReceivedMarks.Clear(); ReceivedParts.Clear(); PartKeys.Clear(); SentMarks.Clear(); ServerMarkedChests.ResetSession();
-            _hello = _token = _world = _pending = _markPending = _openPending = null;
+            _hello = _characterId = _token = _world = _pending = _markPending = _openPending = null;
             _receivingToken = _receivingWorld = _receivingOwner = null; _receivingParts = 0;
             _before = null; _sequence = _pendingSequence = _openSequence = 0; _lastHello = _lastSend = _lastMarks = _lastOpen = 0; _remoteChest = -1;
             _recoveryPending = null; _lastRecovery = 0; _recoveredInventory = false;

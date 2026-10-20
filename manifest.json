@@ -1,7 +1,7 @@
 {
   "id": "quality-of-terraria",
   "name": "Quality of Terraria 更好的体验",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "framework_version": ">=0.4.1",
   "author": "487666123 / Ported for TerrariaModder",
   "description": "移植自 tModLoader MOD 更好的体验",
@@ -52,7 +52,7 @@
     {
       "id": "extreme-storage",
       "label": "终极存储大面板",
-      "description": "呼出集中仓储大面板，支持分类浏览与存取",
+      "description": "打开终极存储，远程查看和存取当前角色标记的箱子",
       "default": "K"
     },
     {

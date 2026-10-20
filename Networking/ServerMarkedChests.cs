@@ -21,17 +21,20 @@ namespace QualityOfTerraria.Networking
 
         private static Marks Get(int player)
         {
-            string identity = PermissionService.GetGuid(player);
+            string identity = RemoteStorageOperations.GetCharacterId(player);
             string world = WorldIdentity;
             if (string.IsNullOrEmpty(identity) || string.IsNullOrEmpty(world) || world == Guid.Empty.ToString("N")) return null;
             string key = world + ":" + identity;
             Marks marks;
             if (Players.TryGetValue(key, out marks)) return marks;
             marks = new Marks { Path = Path.Combine(Main.SavePath, "TerrariaModder", "world-data", world,
-                StoragePersistence.Identity(identity) + ".player-markedchests.dat") };
-            marks.CanSave = !File.Exists(marks.Path) && !File.Exists(marks.Path + ".bak");
+                StoragePersistence.Identity("character:" + identity) + ".player-markedchests.dat") };
+            bool migrate = !File.Exists(marks.Path) && !File.Exists(marks.Path + ".bak");
+            string source = migrate ? Path.Combine(Path.GetDirectoryName(marks.Path),
+                StoragePersistence.Identity(PermissionService.GetGuid(player)) + ".player-markedchests.dat") : marks.Path;
+            marks.CanSave = !File.Exists(source) && !File.Exists(source + ".bak");
             HashSet<long> loaded;
-            if (StoragePersistence.Read(marks.Path, reader =>
+            if (StoragePersistence.Read(source, reader =>
             {
                 int count = reader.ReadInt32();
                 if (count < 0 || count > Main.maxChests) throw new InvalidDataException("玩家箱子标记数量不合法");
@@ -44,6 +47,13 @@ namespace QualityOfTerraria.Networking
                 }
                 return keys;
             }, out loaded)) { marks.Keys.UnionWith(loaded); marks.CanSave = true; }
+            // 首次建立独立文件（包括空列表）；之后不得重新导入旧共用标记。
+            if (migrate && marks.CanSave)
+                StoragePersistence.Write(marks.Path, writer =>
+                {
+                    writer.Write(marks.Keys.Count);
+                    foreach (long coordinate in marks.Keys) writer.Write(coordinate);
+                });
             Players.Add(key, marks);
             return marks;
         }

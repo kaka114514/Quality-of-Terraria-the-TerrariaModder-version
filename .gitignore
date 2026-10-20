@@ -2,6 +2,7 @@
 bin/
 obj/
 github_push/
+release-temp/
 
 # Visual Studio / Rider / VSCode
 .vs/
@@ -23,11 +24,17 @@ $RECYCLE.BIN/
 lib/*.dll
 AGENTS.md
 CLAUDE.md
+NEW_SESSION_QUICKSTART.md
+.superpowers/
+QUICK_DEPLOY.ps1
+RELEASE_NOTES.md
+REFORGE_BUGFIX_NOTES.md
 .codex/
 .claude/
 .gemini/
 .antigravity/
 docs/
+tests/
 *.log
 *.bak
 *.jsonl
