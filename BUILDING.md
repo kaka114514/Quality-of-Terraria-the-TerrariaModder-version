@@ -13,6 +13,8 @@
 
 ## 回归检查
 
+原版保存后鼠标记录兼容：`pwsh -NoProfile -File tests/CursorJournal.VanillaSave.Tests.ps1`。测试在 `bin/cursor-journal-tests/` 创建角色，调用原版保存／加载验证过期鼠标记录恢复、当前物品数量不变、记录备份、下一次进入，以及库存不一致、损坏文件和未知交易仍保持保护；不读写实际玩家存档。
+
 本轮快捷收纳、标记箱效果、倍率设置与世界控制回归：构建客户端后执行 `pwsh -NoProfile -File tests/PortableStorage.Tests.ps1`，再执行 `pwsh -NoProfile -File tests/RemoteStorage.NonHost.Tests.ps1`。前者使用真实 Terraria/Core/生产程序集验证窗口保活、药水阈值、远程制作站、信息配件、原版服务器扣料、配置迁移、时间边界及房主权限；捕获网络和音效，不代替真实绘制、输入法及双客户端验收。
 
 非房主终极存储回归（2026-10-20）：构建客户端后运行 `pwsh -NoProfile -File tests/RemoteStorage.NonHost.Tests.ps1`。脚本编译 x86 测试程序，使用本机真实 Terraria/Core 和生产 DLL，覆盖普通玩家握手、标记保存、快照物品、远程打开，以及身份、令牌、锁箱和占用保护；网络发送与界面输出被测试捕获，不启动游戏。测试数据仅写入 `bin/nonhost-tests/`。该检查不替代两台实际客户端联机验收。`tests/` 是本地保留文件，不随 GitHub 源码分发。

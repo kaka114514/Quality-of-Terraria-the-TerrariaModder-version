@@ -99,7 +99,21 @@ namespace QualityOfTerraria.Networking
             }, out cursor)) { _canSave = false; Status = "鼠标物品记录无法读取；库存保持锁定"; return; }
             try
             {
-                if (cursor.CharacterHash != CharacterHash(Main.ActivePlayerFileData)) throw new InvalidDataException("角色存档与鼠标物品记录不一致");
+                string currentHash = CharacterHash(Main.ActivePlayerFileData);
+                if (cursor.CharacterHash != currentHash)
+                {
+                    VerifyCurrentCharacter(Main.ActivePlayerFileData, currentHash);
+                    // 原版会保存鼠标物品。只在没有待处理交易且当前库存与原版存档一致时，
+                    // 接受当前存档；保留旧记录，不把旧鼠标物品再次恢复出来。
+                    string archive = cursorPath + ".stale-" + Guid.NewGuid().ToString("N");
+                    File.Copy(cursorPath, archive);
+                    if (File.Exists(cursorPath + ".bak")) File.Copy(cursorPath + ".bak", archive + ".bak");
+                    if (File.Exists(_path)) File.Copy(_path, archive + ".journal");
+                    File.WriteAllBytes(archive + ".plr", FileUtilities.ReadAllBytes(Main.ActivePlayerFileData.Path, Main.ActivePlayerFileData.IsCloudSave));
+                    Status = "角色存档已更新并通过核验；保留当前物品，过期鼠标记录已备份";
+                    Mod.LogInfo(Status + "：" + archive);
+                    return;
+                }
                 Item mouse = Main.mouseItem;
                 if (mouse != null && !mouse.IsAir && (mouse.type != cursor.Type || mouse.stack != cursor.Stack || mouse.prefix != cursor.Prefix))
                     throw new InvalidDataException("当前鼠标物品与已保存记录不一致");
@@ -153,6 +167,27 @@ namespace QualityOfTerraria.Networking
 
         private static bool MatchesCharacter(PlayerFileData file)
             => file?.Player == Main.LocalPlayer && file.IsCloudSave == _characterCloud && string.Equals(file.Path, _characterPath, StringComparison.OrdinalIgnoreCase);
+
+        private static void VerifyCurrentCharacter(PlayerFileData file, string expectedHash)
+        {
+            if (!MatchesCharacter(file)) throw new InvalidDataException("当前角色与待核验存档不一致");
+            Player saved = Player.LoadPlayer(file.Path, file.IsCloudSave)?.Player;
+            if (saved == null || saved.loadStatus != StatusID.Ok) throw new InvalidDataException("当前原版角色存档无法读取");
+            for (int i = 0; i < 58; i++)
+                if (!SameSavedItem(file.Player.inventory[i], saved.inventory[i]))
+                    throw new InvalidDataException("当前背包与原版存档不一致，不能自动接纳过期鼠标记录");
+            var slots = (Item[])AccessTools.Field(typeof(Player), "_temporaryItemSlots").GetValue(saved);
+            if (slots == null || slots.Length == 0 || !SameSavedItem(Main.mouseItem, slots[0]))
+                throw new InvalidDataException("当前鼠标物品与原版存档不一致，不能自动接纳过期鼠标记录");
+            if (CharacterHash(file) != expectedHash) throw new InvalidDataException("角色存档在核验期间发生变化");
+        }
+
+        private static bool SameSavedItem(Item actual, Item saved)
+        {
+            bool empty = actual == null || actual.IsAir, savedEmpty = saved == null || saved.IsAir;
+            return empty == savedEmpty && (empty || (actual.type == saved.type && actual.stack == saved.stack
+                && actual.prefix == saved.prefix && actual.favorited == saved.favorited));
+        }
 
         private static void SaveCursor(PlayerFileData file)
         {
