@@ -25,7 +25,8 @@ namespace QualityOfTerraria.Patches
 
         public static bool CanActivateForPlayer(Item item, QualityOfTerrariaConfig config)
         {
-            return config != null && config.InfiniteRedPotion && item != null && item.type == ItemID.RedPotion &&
+            return config != null && config.InfinitePotions && !InfiniteBuffsPatches.IsPotionBlacklisted(config, item?.type ?? 0) &&
+                item != null && item.type == ItemID.RedPotion &&
                 item.stack >= Math.Max(1, Math.Min(300, config.RedPotionRequirement)) &&
                 (Main.getGoodWorld || config.RedPotionEverywhere);
         }
@@ -38,7 +39,8 @@ namespace QualityOfTerraria.Patches
         public static void ApplyInfiniteBuffsForPlayer(Player player, Item item, QualityOfTerrariaConfig config, int totalStack = -1)
         {
             if (totalStack < 0) { if (!CanActivateForPlayer(item, config)) return; }
-            else if (config == null || !config.InfiniteRedPotion || item == null || item.type != ItemID.RedPotion ||
+            else if (config == null || !config.InfinitePotions || item == null || item.type != ItemID.RedPotion ||
+                InfiniteBuffsPatches.IsPotionBlacklisted(config, item.type) ||
                 totalStack < System.Math.Max(1, System.Math.Min(300, config.RedPotionRequirement)) ||
                 (!Main.getGoodWorld && !config.RedPotionEverywhere)) return;
             foreach (int buff in ExtendedBuffs) player.AddBuff(buff, 120, false);

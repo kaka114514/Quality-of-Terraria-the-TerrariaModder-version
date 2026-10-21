@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Input;
@@ -29,6 +30,9 @@ namespace QualityOfTerraria
         private static int _hoverTileX = -1;
         private static int _hoverTileY = -1;
         private static bool _hasHoverTile = false;
+        private static readonly HashSet<int> PlantingItems = new HashSet<int>(typeof(ItemID).GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(field => (field.FieldType == typeof(int) || field.FieldType == typeof(short)) && field.Name.EndsWith("Seeds", StringComparison.Ordinal))
+            .Select(field => Convert.ToInt32(field.GetValue(null)))) { ItemID.Acorn };
 
         public static void ExecuteQuickPlace()
         {
@@ -37,7 +41,7 @@ namespace QualityOfTerraria
             if (QuickPlaceActive)
             {
                 SoundEngine.PlaySound(SoundID.MenuOpen);
-                Main.NewText("快速放置: 已开启！(手持方块/平台/墙，按住左键拖拽铺设，右键取消)", 100, 255, 150);
+                Main.NewText("快速放置：已开启（左键拖拽铺设，右键取消）", 100, 255, 150);
             }
             else
             {
@@ -59,8 +63,14 @@ namespace QualityOfTerraria
             }
 
             Player player = Main.LocalPlayer;
-            if (player == null || !player.active || player.dead || Main.playerInventory || Main.gameMenu || Main.drawingPlayerChat || Main.editChest || Main.editSign)
+            if (player == null || !player.active || player.dead || Main.playerInventory || Main.gameMenu || Main.mapFullscreen ||
+                Main.drawingPlayerChat || Main.editChest || Main.editSign || Main.ingameOptionsWindow)
             {
+                if (Main.mapFullscreen && QuickPlaceActive)
+                {
+                    QuickPlaceActive = false;
+                    Main.NewText("快速放置：打开地图后已自动关闭。", 255, 180, 100);
+                }
                 _isDragging = false;
                 return;
             }
@@ -220,7 +230,9 @@ namespace QualityOfTerraria
                         bool placed;
                         if (!job.Wall)
                         {
-                            if (tile.active() && !TryReplaceTile(player, x, y, pickPower)) continue;
+                            bool planting = PlantingItems.Contains(held.type);
+                            if (IsSameTilePlacement(tile, held)) continue;
+                            if (tile.active() && (planting || !TryReplaceTile(player, x, y, pickPower))) continue;
                             PlaceTileSilently(player, held, x, y);
                             placed = tile.active();
                         }
@@ -270,11 +282,24 @@ namespace QualityOfTerraria
             return !tile.active();
         }
 
+        private static bool IsSameTilePlacement(Tile tile, Item held)
+        {
+            if (tile == null || !tile.active() || held == null || held.createTile < 0 || tile.type != held.createTile)
+                return false;
+            if (TileID.Sets.Platforms != null && TileID.Sets.Platforms[tile.type])
+                return tile.frameY == held.placeStyle * 18;
+            if (TileID.Sets.BasicChest != null && TileID.Sets.BasicChest[tile.type])
+                return tile.frameX / 36 == held.placeStyle;
+            if (TileID.Sets.BasicDresser != null && TileID.Sets.BasicDresser[tile.type])
+                return tile.frameX / 54 == held.placeStyle;
+            return true;
+        }
+
         // 批量铺设必须静音：原版 PlaceTile 默认每格播放一次挖掘音效并生成尘土，
         // 上千格会在单帧内触发上千次音效调用，造成明显卡顿；收尾统一播放一次音效。
         private static void PlaceTileSilently(Player player, Item held, int x, int y)
         {
-            WorldGen.PlaceTile(x, y, held.createTile, true, true, player.whoAmI, held.placeStyle);
+            WorldGen.PlaceTile(x, y, held.createTile, !PlantingItems.Contains(held.type), true, player.whoAmI, held.placeStyle);
         }
 
         private static void FinishPlacementJob(PlacementJob job)
@@ -320,6 +345,11 @@ namespace QualityOfTerraria
             int maxX = Math.Min(Main.maxTilesX - 10, Math.Max(x1, x2));
             int minY = Math.Max(10, Math.Min(y1, y2));
             int maxY = Math.Min(Main.maxTilesY - 10, Math.Max(y1, y2));
+            if (((long)maxX - minX + 1) * ((long)maxY - minY + 1) > 4096)
+            {
+                Main.NewText("快速放置：框选超过单次4096格上限，请缩小范围。", 255, 180, 100);
+                return 0;
+            }
 
             int placed = 0;
             bool noConsume = config != null && config.WandMaterialNoConsume;
@@ -339,7 +369,9 @@ namespace QualityOfTerraria
                     if (isTile)
                     {
                         // 空格直接放置；已有方块时按原版规则替换：背包里有能挖掉它的镐子即可。
-                        if (!tile.active() || TryReplaceTile(player, x, y, pickPower))
+                        bool planting = PlantingItems.Contains(held.type);
+                        if (IsSameTilePlacement(tile, held)) continue;
+                        if (planting ? !tile.active() : (!tile.active() || TryReplaceTile(player, x, y, pickPower)))
                         {
                             PlaceTileSilently(player, held, x, y);
                             if (tile.active())

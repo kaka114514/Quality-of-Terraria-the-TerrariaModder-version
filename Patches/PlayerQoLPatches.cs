@@ -11,6 +11,7 @@ namespace QualityOfTerraria.Patches
     {
         // 死亡时暂存的 Buff 列表 (BuffType, BuffTime)
         private static readonly Dictionary<int, List<KeyValuePair<int, int>>> _savedBuffs = new Dictionary<int, List<KeyValuePair<int, int>>>();
+        private static readonly Dictionary<int, int> _lastAutoMarkedChest = new Dictionary<int, int>();
 
         // 1. 金币拾取自动存入存钱罐
         [HarmonyPatch(typeof(Player), nameof(Player.DoCoins))]
@@ -96,13 +97,21 @@ namespace QualityOfTerraria.Patches
                 if (__instance.whoAmI == Main.myPlayer)
                 {
                     UI.UIManager.UpdateAll();
-
-                    // 玩家打开过一次箱子，自动标记该箱子纳入终极存储
-                    if (__instance.chest >= 0 && __instance.chest < Main.maxChests)
-                    {
-                        UI.ExtremeStorageUI.MarkChest(__instance.chest);
-                    }
                 }
+
+                int previousChest;
+                _lastAutoMarkedChest.TryGetValue(__instance.whoAmI, out previousChest);
+                if (__instance.chest >= 0 && __instance.chest != previousChest && __instance.chest < Main.maxChests && Main.chest != null && Main.chest[__instance.chest] != null)
+                {
+                    if (Main.netMode == 2)
+                    {
+                        Chest chest = Main.chest[__instance.chest];
+                        if (!Networking.ServerMarkedChests.IsMarked(__instance.whoAmI, chest))
+                            Networking.ServerMarkedChests.Change(__instance.whoAmI, Networking.ServerMarkedChests.Key(chest), true);
+                    }
+                    else if (__instance.whoAmI == Main.myPlayer) Networking.RemoteStorageOperations.EnsureCurrentChestMarked();
+                }
+                _lastAutoMarkedChest[__instance.whoAmI] = __instance.chest;
 
                 // 消除伤害浮动 (原生支持，彻底避免对高频伤害函数进行拦截)
                 if (Main.netMode != 1) Terraria.Testing.DebugOptions.NoDamageVar = Mod.Config.NoDamageVariance;
@@ -130,24 +139,6 @@ namespace QualityOfTerraria.Patches
                     float placement = config.PlacementSpeedMultiplier;
                     __instance.tileSpeed /= placement;
                     __instance.wallSpeed /= placement;
-                }
-            }
-        }
-
-        [HarmonyPatch(typeof(Player), "ApplyItemAnimation", typeof(Item))]
-        public static class ToolAnimationPatch
-        {
-            public static void Postfix(Player __instance, Item sItem)
-            {
-                if (!Mod.WorldActive || Mod.Config == null || !Features.ToolSpeedSystem.SpeedActive || __instance == null || __instance.whoAmI != Main.myPlayer || sItem == null)
-                    return;
-                var config = Networking.SettingsSync.GetPlayerConfig(__instance.whoAmI);
-                if (config == null) return;
-                if (sItem.pick > 0 || sItem.axe > 0 || sItem.hammer > 0)
-                {
-                    float multiplier = config.ToolSpeedMultiplier;
-                    __instance.itemAnimation = Math.Max(1, (int)(__instance.itemAnimation / multiplier));
-                    __instance.itemAnimationMax = Math.Max(1, (int)(__instance.itemAnimationMax / multiplier));
                 }
             }
         }

@@ -288,9 +288,17 @@ namespace QualityOfTerraria.Networking
                         else if (action == "spawn-rate")
                         {
                             if (!PermissionService.IsAdmin(client)) throw new InvalidDataException("刷怪倍率需要房主或服务器管理权限");
-                            if (count != 1 || values[0] < 0 || values[0] > 1000) throw new InvalidDataException("刷怪倍率必须为0至100倍");
-                            if (!WorldQoLCompletionPatches.SetSpawnRate(values[0] / 10f)) throw new InvalidDataException("服务器未应用刷怪倍率");
-                            message = "服务器刷怪倍率已设为 " + (values[0] / 10f).ToString("0.#") + "x";
+                            if (count != 2 || values[0] < 0 || values[0] > 5000 || values[1] < 0 || values[1] > 5000) throw new InvalidDataException("敌对生物和小动物倍率必须分别为0至500倍");
+                            if (!WorldQoLCompletionPatches.SetSpawnRates(values[0] / 10f, values[1] / 10f)) throw new InvalidDataException("服务器未应用刷怪倍率");
+                            message = "服务器刷怪倍率已更新：敌对 " + (values[0] / 10f).ToString("0.#") + "×，小动物 " + (values[1] / 10f).ToString("0.#") + "×";
+                        }
+                        else if (action == "spawn-rate-one")
+                        {
+                            if (!PermissionService.IsAdmin(client)) throw new InvalidDataException("刷怪倍率需要房主或服务器管理权限");
+                            if (count != 2 || (values[0] != 0 && values[0] != 1) || values[1] < 0 || values[1] > 5000)
+                                throw new InvalidDataException("单项刷怪倍率请求无效");
+                            if (!WorldQoLCompletionPatches.SetSingleSpawnRate(values[0], values[1] / 10f)) throw new InvalidDataException("服务器未应用刷怪倍率");
+                            message = (values[0] == 0 ? "敌对生物" : "小动物") + "刷怪倍率已更新为 " + (values[1] / 10f).ToString("0.#") + "×";
                         }
                         else if (action == "world-toggle")
                         {

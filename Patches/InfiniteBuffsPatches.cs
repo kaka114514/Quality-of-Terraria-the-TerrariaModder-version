@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using HarmonyLib;
 using Terraria;
@@ -25,7 +26,7 @@ namespace QualityOfTerraria.Patches
             bool infiniteStations = config.InfiniteStationsAndBanners;
             int req = config.PotionStackRequirement;
 
-            if (!infinitePotions && !infiniteStations && !config.InfiniteRedPotion)
+            if (!infinitePotions && !infiniteStations)
                 return;
 
             var potionCounts = new Dictionary<int, int>();
@@ -35,7 +36,8 @@ namespace QualityOfTerraria.Patches
                     continue;
 
                 // 1. 无限药水
-                if (infinitePotions && item.type != ItemID.RedPotion && item.buffType > 0 && !Main.debuff[item.buffType] && item.consumable)
+                if (infinitePotions && item.type != ItemID.RedPotion && !IsPotionBlacklisted(config, item.type) &&
+                    item.buffType > 0 && !Main.debuff[item.buffType] && item.consumable)
                 {
                     int previous;
                     potionCounts.TryGetValue(item.type, out previous);
@@ -45,7 +47,7 @@ namespace QualityOfTerraria.Patches
                     if (previous < req && total >= req) __instance.AddBuff(item.buffType, 120, false);
                 }
 
-                if (item.type == ItemID.RedPotion)
+                if (infinitePotions && item.type == ItemID.RedPotion && !IsPotionBlacklisted(config, item.type))
                 {
                     int previous;
                     potionCounts.TryGetValue(item.type, out previous);
@@ -100,6 +102,17 @@ namespace QualityOfTerraria.Patches
                     }
                 }
             }
+        }
+
+        internal static bool IsPotionBlacklisted(int itemType)
+        {
+            return IsPotionBlacklisted(Mod.Config, itemType);
+        }
+
+        internal static bool IsPotionBlacklisted(QualityOfTerrariaConfig config, int itemType)
+        {
+            if (config?.InfinitePotionBlacklist == null) return false;
+            return Array.IndexOf(config.InfinitePotionBlacklist, itemType) >= 0;
         }
 
         public static IEnumerable<Item> GetAllPlayerItems(Player player)

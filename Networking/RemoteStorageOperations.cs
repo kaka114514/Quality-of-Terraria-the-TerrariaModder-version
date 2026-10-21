@@ -451,6 +451,42 @@ namespace QualityOfTerraria.Networking
 
         private static void SynchronizeMarksIfIdle() { if (_markPending == null) SynchronizeMarks(); }
 
+        internal static bool ToggleCurrentChestMark()
+        {
+            Player player = Main.LocalPlayer;
+            if (player == null || player.chest < 0 || player.chest >= Main.maxChests || Main.chest == null || Main.chest[player.chest] == null)
+            {
+                Main.NewText("请先打开一个普通箱子，再使用标记快捷键。", 255, 210, 120);
+                return false;
+            }
+            if (Main.netMode == 1 && !Ready)
+            {
+                Main.NewText("正在等待服务器确认箱子标记，请稍后再试。", 255, 210, 120);
+                return false;
+            }
+            if (Main.netMode == 1 && _markPending != null)
+            {
+                Main.NewText("正在同步箱子标记，请稍后再试。", 255, 210, 120);
+                return false;
+            }
+            UI.ExtremeStorageUI.ToggleMarkChest(Main.chest[player.chest]);
+            if (Main.netMode == 1) SynchronizeMarks();
+            return true;
+        }
+
+        internal static bool EnsureCurrentChestMarked()
+        {
+            Player player = Main.LocalPlayer;
+            if (player == null || player.chest < 0 || player.chest >= Main.maxChests || Main.chest == null || Main.chest[player.chest] == null)
+                return false;
+            Chest chest = Main.chest[player.chest];
+            if (ExtremeStorageUI.IsChestMarked(chest)) return false;
+            if (Main.netMode == 1 && (!Ready || _markPending != null)) return false;
+            ExtremeStorageUI.MarkChest(player.chest);
+            if (Main.netMode == 1) SynchronizeMarks();
+            return true;
+        }
+
 
         private static void Execute(int client, Peer peer, string payload, BinaryReader reader)
         {

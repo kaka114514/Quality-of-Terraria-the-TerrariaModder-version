@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using TerrariaModder.Core.Config;
+using Terraria.ID;
 
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("QualityOfTerraria.Server")]
 
@@ -41,7 +42,7 @@ namespace QualityOfTerraria
                     }
                     catch (Exception exception) { VeinImportStateError = exception.Message; }
                 }
-                return 4;
+                return 5;
             }
         }
 
@@ -67,6 +68,13 @@ namespace QualityOfTerraria
                 if (!raw.ContainsKey(nameof(PylonTeleportIgnoreDanger))) PylonTeleportIgnoreDanger = universal;
                 if (!raw.ContainsKey(nameof(PylonTeleportIgnoreBiome))) PylonTeleportIgnoreBiome = universal;
             }
+            if (!raw.ContainsKey(nameof(InfinitePotionBlacklist)))
+                InfinitePotionBlacklist = DefaultPotionBlacklist();
+            if (!raw.ContainsKey(nameof(HostileSpawnRateMultiplier)) && raw.TryGetValue("SpawnRateMultiplier", out object oldSpawn))
+            {
+                try { HostileSpawnRateMultiplier = Math.Max(0f, Math.Min(500f, Convert.ToSingle(oldSpawn))); }
+                catch { HostileSpawnRateMultiplier = 1f; }
+            }
         }
 
         // ================= 物品与收纳 =================
@@ -83,11 +91,6 @@ namespace QualityOfTerraria
         public int PotionStackRequirement { get; set; } = 30;
 
         [Client]
-        [Label("无限红药水增益")]
-        [Description("红药水达到所需数量时，获得原模组扩展的18种药水增益。特殊种子世界或开启随处可用时生效。")]
-        public bool InfiniteRedPotion { get; set; } = true;
-
-        [Client]
         [Label("红药水随处可用")]
         [Description("允许非特殊种子世界直接使用红药水获得原版正面增益，并允许无限红药水扩展。")]
         public bool RedPotionEverywhere { get; set; } = true;
@@ -96,6 +99,31 @@ namespace QualityOfTerraria
         [Label("无限红药水所需数量")]
         [Range(1, 300)]
         public int RedPotionRequirement { get; set; } = 20;
+
+        private int[] _infinitePotionBlacklist = DefaultPotionBlacklist();
+
+        private static int[] DefaultPotionBlacklist()
+            => new[] {
+                (int)ItemID.GravitationPotion, (int)ItemID.InvisibilityPotion,
+                (int)ItemID.BiomeSightPotion, (int)ItemID.LovePotion,
+                (int)ItemID.CalmingPotion, (int)ItemID.BattlePotion,
+                (int)ItemID.RedPotion, (int)ItemID.ManaPotion
+            };
+
+        internal static int[] NormalizePotionBlacklist(IEnumerable<int> values)
+        {
+            if (values == null) return Array.Empty<int>();
+            return values.Where(value => value > 0 && value < ItemID.Count).Distinct().Take(64).ToArray();
+        }
+
+        [Client]
+        [Label("药水增益黑名单")]
+        [Description("点击展开药水图标；被选中的药水即使达到数量要求，也不会触发无限增益。灰色图标带红色斜杠表示已屏蔽。")]
+        public int[] InfinitePotionBlacklist
+        {
+            get => _infinitePotionBlacklist;
+            set => _infinitePotionBlacklist = NormalizePotionBlacklist(value);
+        }
 
         [Client]
         [Label("随身增益站")]
@@ -267,9 +295,15 @@ namespace QualityOfTerraria
         // ================= 世界与生态 =================
         [Server]
         [Label("敌怪生成倍率")]
-        [Range(0, 100)]
-        [Description("调整生成频率和数量上限；0为和平模式，1为原版。联机由服务器配置。")]
-        public float SpawnRateMultiplier { get; set; } = 1f;
+        [Range(0, 500)]
+        [Description("调整敌对生物的自然生成频率和数量上限；0为禁止生成，1为原版，最高500倍。联机由服务器配置。")]
+        public float HostileSpawnRateMultiplier { get; set; } = 1f;
+
+        [Server]
+        [Label("小动物生成倍率")]
+        [Range(0, 500)]
+        [Description("调整兔子、鸟、蝴蝶等小动物的自然生成倍率；0为禁止生成，1为原版，最高500倍。城镇NPC保持独立。")]
+        public float CritterSpawnRateMultiplier { get; set; } = 1f;
 
         [Server]
         [Label("禁止邪恶群落蔓延")]

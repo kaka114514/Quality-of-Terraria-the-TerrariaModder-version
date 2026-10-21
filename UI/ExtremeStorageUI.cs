@@ -352,10 +352,12 @@ namespace QualityOfTerraria.UI
             if (_markedChests.Contains(key))
             {
                 _markedChests.Remove(key);
+                Main.NewText("【终极存储】已取消标记箱子。", 255, 190, 130);
             }
             else
             {
                 _markedChests.Add(key);
+                Main.NewText("【终极存储】已标记箱子。", 120, 240, 255);
             }
             SaveMarkedChests();
             RefreshItems();
@@ -1430,7 +1432,7 @@ namespace QualityOfTerraria.UI
             var config = Mod.Config;
             string[] lines = {
                 "箱内材料：全世界自己的有效标记箱，可远程合成",
-                "无限药水：" + (config?.InfinitePotions == true ? "开启" : "关闭") + "，同种药水累计至少 " + (config?.PotionStackRequirement ?? 30) + " 瓶",
+                "无限药水：" + (config?.InfinitePotions == true ? "开启" : "关闭") + "，同种药水累计至少 " + (config?.PotionStackRequirement ?? 30) + " 瓶；只读取自己明确标记的箱子",
                 "便携制作站（含远程标记箱）：" + (config?.PortableCraftingStations == true ? "开启" : "关闭"),
                 "增益站：" + (config?.InfiniteStationsAndBanners == true ? "开启" : "关闭"),
                 Main.netMode == 1 ? "联机：全世界标记箱子可远程存取；由服务器确认" : "单人：已标记且未锁/未占用的箱子参与存取与合成",

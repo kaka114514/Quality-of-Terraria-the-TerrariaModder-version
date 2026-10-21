@@ -15,22 +15,57 @@ namespace QualityOfTerraria.Patches
 {
     public static class WorldQoLCompletionPatches
     {
-        public static float SpawnRateMultiplier => Mod.Config?.SpawnRateMultiplier ?? 1f;
-        public static string SpawnRateStatus => Main.netMode == 1 ? NetSync.LocalPlayerIsAdmin ? "房间规则：管理员可调整" : "房间规则：由房主／管理员调整" : $"当前倍率：{SpawnRateMultiplier:0.##}x";
+        public static float HostileSpawnRateMultiplier => Mod.Config?.HostileSpawnRateMultiplier ?? 1f;
+        public static float CritterSpawnRateMultiplier => Mod.Config?.CritterSpawnRateMultiplier ?? 1f;
+        private static bool _naturalSpawnAttempt;
+        public static string SpawnRateStatus => Main.netMode == 1 ? NetSync.LocalPlayerIsAdmin ? "房间规则：管理员可调整" : "房间规则：由房主／管理员调整" : "敌对 " + HostileSpawnRateMultiplier.ToString("0.#") + "× · 小动物 " + CritterSpawnRateMultiplier.ToString("0.#") + "×";
 
-        public static bool SetSpawnRate(float multiplier)
+        public static bool SetSpawnRates(float hostile, float critter)
         {
             if (Main.netMode == 1) return false;
-            if (Mod.Config == null || float.IsNaN(multiplier) || float.IsInfinity(multiplier)) return false;
-            float previous = Mod.Config.SpawnRateMultiplier;
-            Mod.Config.SpawnRateMultiplier = Math.Max(0f, Math.Min(100f, multiplier));
+            if (Mod.Config == null || float.IsNaN(hostile) || float.IsInfinity(hostile) || float.IsNaN(critter) || float.IsInfinity(critter)) return false;
+            float previousHostile = Mod.Config.HostileSpawnRateMultiplier, previousCritter = Mod.Config.CritterSpawnRateMultiplier;
+            Mod.Config.HostileSpawnRateMultiplier = Math.Max(0f, Math.Min(500f, hostile));
+            Mod.Config.CritterSpawnRateMultiplier = Math.Max(0f, Math.Min(500f, critter));
             string error;
             bool saved = Main.netMode == 2 ? ConfigManager.GetCurrentScope() == ConfigScope.Server && SettingsSync.SaveVerified(Mod.Config, out error)
                 : LocalWorldSettings.Save(out error);
-            if (!saved) { Mod.Config.SpawnRateMultiplier = previous; return false; }
+            if (!saved) { Mod.Config.HostileSpawnRateMultiplier = previousHostile; Mod.Config.CritterSpawnRateMultiplier = previousCritter; return false; }
             if (Main.netMode == 2)
             {
-                var metadata = Mod.Config.GetPropertyMetadata().First(p => p.Property.Name == nameof(QualityOfTerrariaConfig.SpawnRateMultiplier));
+                foreach (string key in new[] { nameof(QualityOfTerrariaConfig.HostileSpawnRateMultiplier), nameof(QualityOfTerrariaConfig.CritterSpawnRateMultiplier) })
+                {
+                    var metadata = Mod.Config.GetPropertyMetadata().First(p => p.Property.Name == key);
+                    NetSync.BroadcastConfigChange("quality-of-terraria", metadata, Mod.Config, -1);
+                }
+            }
+            return true;
+        }
+
+        public static bool SetSingleSpawnRate(int kind, float value)
+        {
+            if (Main.netMode == 1 || Mod.Config == null || (kind != 0 && kind != 1) ||
+                float.IsNaN(value) || float.IsInfinity(value)) return false;
+            float clamped = Math.Max(0f, Math.Min(500f, value));
+            float hostile = kind == 0 ? clamped : Mod.Config.HostileSpawnRateMultiplier;
+            float critter = kind == 1 ? clamped : Mod.Config.CritterSpawnRateMultiplier;
+            float previousHostile = Mod.Config.HostileSpawnRateMultiplier;
+            float previousCritter = Mod.Config.CritterSpawnRateMultiplier;
+            if (kind == 0) Mod.Config.HostileSpawnRateMultiplier = clamped;
+            else Mod.Config.CritterSpawnRateMultiplier = clamped;
+            string error;
+            bool saved = Main.netMode == 2 ? ConfigManager.GetCurrentScope() == ConfigScope.Server && SettingsSync.SaveVerified(Mod.Config, out error)
+                : LocalWorldSettings.Save(out error);
+            if (!saved)
+            {
+                Mod.Config.HostileSpawnRateMultiplier = previousHostile;
+                Mod.Config.CritterSpawnRateMultiplier = previousCritter;
+                return false;
+            }
+            if (Main.netMode == 2)
+            {
+                string key = kind == 0 ? nameof(QualityOfTerrariaConfig.HostileSpawnRateMultiplier) : nameof(QualityOfTerrariaConfig.CritterSpawnRateMultiplier);
+                var metadata = Mod.Config.GetPropertyMetadata().First(p => p.Property.Name == key);
                 NetSync.BroadcastConfigChange("quality-of-terraria", metadata, Mod.Config, -1);
             }
             return true;
@@ -45,21 +80,54 @@ namespace QualityOfTerraria.Patches
             maxSpawns = Math.Max(1, (int)Math.Round(maxSpawns * (double)multiplier));
         }
 
+        internal static float GetCandidateSpawnScale(int npcType)
+        {
+            if (npcType < 0 || npcType >= NPCID.Sets.CountsAsCritter.Length) return 1f;
+            float max = Math.Max(HostileSpawnRateMultiplier, CritterSpawnRateMultiplier);
+            bool smallCritter = NPCID.Sets.CountsAsCritter[npcType] &&
+                !NPCID.Sets.IsTownPet[npcType] && !NPCID.Sets.IsTownSlime[npcType];
+            float selected = smallCritter ? CritterSpawnRateMultiplier : HostileSpawnRateMultiplier;
+            return max <= 0f ? 0f : selected / max;
+        }
+
         [HarmonyPatch]
         public static class SpawnRatePatch
         {
             public static MethodBase TargetMethod() => AccessTools.Method(AccessTools.Inner(typeof(NPC), "Spawner"), "GetSpawnRate");
             public static void Postfix(ref int spawnRate, ref int maxSpawns)
+            { if (Main.netMode != 1) ScaleSpawnRate(ref spawnRate, ref maxSpawns, Math.Max(HostileSpawnRateMultiplier, CritterSpawnRateMultiplier)); }
+        }
+
+        [HarmonyPatch]
+        public static class NaturalSpawnCandidatePatch
+        {
+            private static MethodBase SpawnCandidate() => AccessTools.Method(
+                AccessTools.Inner(typeof(NPC), "Spawner"), "SpawnNPC",
+                new[] { typeof(int), typeof(int), typeof(int), typeof(int), typeof(float), typeof(float), typeof(float), typeof(float), typeof(int) });
+
+            [HarmonyTargetMethod]
+            private static MethodBase TargetMethod() => SpawnCandidate();
+
+            private static bool Prefix(int __2)
             {
-                if (Main.netMode != 1) ScaleSpawnRate(ref spawnRate, ref maxSpawns, SpawnRateMultiplier);
+                if (Main.netMode == 1 || !_naturalSpawnAttempt || __2 < 0 || __2 >= NPCID.Sets.CountsAsCritter.Length) return true;
+                float scale = GetCandidateSpawnScale(__2);
+                return scale >= 1f || (scale > 0f && Main.rand.NextDouble() < scale);
             }
+        }
+
+        [HarmonyPatch(typeof(NPC), "SpawnNPC")]
+        public static class NaturalSpawnScopePatch
+        {
+            private static void Prefix() { _naturalSpawnAttempt = true; }
+            private static void Postfix() { _naturalSpawnAttempt = false; }
         }
 
         // 只阻止自然刷怪循环，不影响显式召唤 Boss 或城镇 NPC。
         [HarmonyPatch(typeof(NPC), nameof(NPC.SpawnNPC))]
         public static class ZeroSpawnRatePatch
         {
-            public static bool Prefix() => Main.netMode == 1 || SpawnRateMultiplier > 0f;
+            public static bool Prefix() => Main.netMode == 1 || Math.Max(HostileSpawnRateMultiplier, CritterSpawnRateMultiplier) > 0f;
         }
 
         [HarmonyPatch(typeof(WorldGen), "AttemptToGrowTreeFromSapling")]

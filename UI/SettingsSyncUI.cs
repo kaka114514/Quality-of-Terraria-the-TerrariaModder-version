@@ -30,6 +30,12 @@ namespace QualityOfTerraria.UI
         internal static void AddConfigRow(List<ValueTuple<string, object, ModInfo>> rows, ValueTuple<string, object, ModInfo> row)
         {
             rows.Add(row);
+            if (_enabled && row.Item1 == "property" && row.Item2 is ConfigPropertyMeta potionMeta &&
+                potionMeta.Key == nameof(QualityOfTerrariaConfig.RedPotionRequirement) && row.Item3?.Manifest?.Id == ModId &&
+                row.Item3.Context?.Config == Mod.Config)
+            {
+                PotionBlacklistUI.AddRows(rows, row);
+            }
             if (!_enabled || row.Item1 != "header" || row.Item3?.Manifest?.Id != ModId || row.Item3.Context?.Config != Mod.Config) return;
             int count = 2 + Math.Min(4, SettingsSync.Requests.Count);
             for (int i = 0; i < count; i++) rows.Add(ValueTuple.Create("property", (object)Markers[i], row.Item3));
@@ -38,6 +44,7 @@ namespace QualityOfTerraria.UI
         internal static bool DrawConfigRow(int x, int y, int width, ConfigPropertyMeta metadata, ModConfig config, string modId)
         {
             if (modId != ModId || !ReferenceEquals(config, Mod.Config)) return true;
+            if (PotionBlacklistUI.IsMarker(metadata)) return PotionBlacklistUI.Draw(x, y, width, metadata, config);
             int marker = Array.IndexOf(Markers, metadata);
             // 同步按钮和状态行没有 Property，必须先识别，不能送入真实配置控件读取 Key。
             if (marker < 0) return SpeedSettingsUI.Draw(x, y, width, metadata, config, modId);

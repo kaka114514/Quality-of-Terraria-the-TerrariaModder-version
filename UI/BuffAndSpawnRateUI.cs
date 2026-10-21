@@ -20,22 +20,22 @@ namespace QualityOfTerraria.UI
         public static int PanelX = 320;
         public static int PanelY = 220;
         public static int PanelWidth = 360;
-        public static int PanelHeight = 370;
+        public static int PanelHeight = 450;
 
         private static bool _isDragging = false;
         private static int _dragOffsetX = 0;
         private static int _dragOffsetY = 0;
 
-        public static float SpawnRateMultiplier = 1.0f; // 0.0x ~ 100.0x
         private static bool _sliderDragging;
         private static float _sliderPreview;
+        private static int _spawnSliderKind;
         private static int _tab, _timePreview;
         private static bool _timeDragging, _timeEdited;
 
         private static void ClampLayout()
         {
             PanelWidth = Math.Min(360, PanelLayout.ScreenWidth);
-            PanelHeight = Math.Min(370, PanelLayout.ScreenHeight);
+            PanelHeight = Math.Min(450, PanelLayout.ScreenHeight);
             PanelLayout.ClampToScreen(ref PanelX, ref PanelY, PanelWidth, PanelHeight);
         }
 
@@ -144,14 +144,17 @@ namespace QualityOfTerraria.UI
             int row = Math.Max(22, Math.Min(32, (PanelHeight - 145) / 6));
             if (_tab == 0)
             {
-                PanelLayout.DrawFittedText("刷怪倍率：" + WorldQoLCompletionPatches.SpawnRateMultiplier.ToString("0.#") + "×", x, y, width, 255, 230, 120);
+                PanelLayout.DrawFittedText("敌对生物倍率：" + SpawnValueText(0) + "（上限500×）", x, y, width, 255, 230, 120);
                 y += row;
-                float[] presets = { 0, 0.5f, 1, 2, 5, 10, 30, 100 };
-                int buttonWidth = (width - 12) / 4;
-                for (int i = 0; i < presets.Length; i++)
-                    if (DrawAction(presets[i].ToString("0.#") + "×", x + (i % 4) * (buttonWidth + 4), y + (i / 4) * row, buttonWidth, row - 4)) SubmitSpawnRate(presets[i]);
-                y += row * 2;
-                DrawSpawnSlider(x, y + 4, width, 14);
+                DrawSpawnSlider(x, y + 4, width, 14, 0);
+                y += row;
+                DrawSpawnPresets(x, y, width, row, 0);
+                y += row;
+                PanelLayout.DrawFittedText("小动物倍率：" + SpawnValueText(1) + "（兔子、鸟、蝴蝶等）", x, y, width, 255, 230, 120);
+                y += row;
+                DrawSpawnSlider(x, y + 4, width, 14, 1);
+                y += row;
+                DrawSpawnPresets(x, y, width, row, 1);
                 y += row;
                 if (!_timeEdited && !_timeDragging) _timePreview = WorldControlSystem.GetClockMinute();
                 PanelLayout.DrawFittedText("时间：" + ClockText(WorldControlSystem.GetClockMinute()) + " → " + ClockText(_timePreview), x, y, width, 190, 225, 255);
@@ -164,6 +167,7 @@ namespace QualityOfTerraria.UI
                     _timeEdited = false;
                 }
                 PanelLayout.DrawFittedText("00:00                         23:59", x, y + 25, width - 70, 160, 180, 205);
+                PanelLayout.DrawFittedText("白天：04:30–19:30    夜晚：19:30–04:30", x, y + 43, width, 175, 205, 225);
             }
             else if (_tab == 1)
             {
@@ -204,6 +208,13 @@ namespace QualityOfTerraria.UI
 
         private static string ClockText(int minute) => (minute / 60).ToString("00") + ":" + (minute % 60).ToString("00");
 
+        private static string SpawnValueText(int kind)
+        {
+            float value = _sliderDragging && _spawnSliderKind == kind ? _sliderPreview :
+                (kind == 0 ? WorldQoLCompletionPatches.HostileSpawnRateMultiplier : WorldQoLCompletionPatches.CritterSpawnRateMultiplier);
+            return value.ToString("0.#") + "×";
+        }
+
         private static void ApplyLocal(Func<string> action)
         {
             try { Main.NewText(action(), 150, 230, 255); }
@@ -239,39 +250,58 @@ namespace QualityOfTerraria.UI
 
         internal static float SliderValue(int mouseX, int x, int width)
         {
-            return width <= 0 ? 0f : (float)Math.Round(Math.Max(0f, Math.Min(100f, (mouseX - x) * 100f / width)), 1);
+            return width <= 0 ? 0f : (float)Math.Round(Math.Max(0f, Math.Min(500f, (mouseX - x) * 500f / width)), 1);
         }
 
-        private static void SubmitSpawnRate(float value)
+        private static void SubmitSpawnRate(int kind, float value)
         {
             if (Main.netMode == 1)
             {
-                ToolNetwork.Request("spawn-rate", -1, (int)Math.Round(value * 10f));
+                ToolNetwork.Request("spawn-rate-one", -1, kind, (int)Math.Round(value * 10f));
             }
-            else if (!WorldQoLCompletionPatches.SetSpawnRate(value)) Main.NewText("刷怪倍率保存失败，已保留原值。", 255, 180, 100);
+            else if (!WorldQoLCompletionPatches.SetSingleSpawnRate(kind, value)) Main.NewText("刷怪倍率保存失败，已保留原值。", 255, 180, 100);
         }
 
-        private static void DrawSpawnSlider(int x, int y, int width, int height)
+        private static void DrawSpawnSlider(int x, int y, int width, int height, int kind)
         {
             bool hover = UIRenderer.MouseX >= x && UIRenderer.MouseX <= x + width && UIRenderer.MouseY >= y - 4 && UIRenderer.MouseY <= y + height + 4;
             if (hover) Main.LocalPlayer.mouseInterface = true;
             if (hover && UIRenderer.MouseLeftClick)
             {
                 if (Main.netMode == 1 && !NetSync.LocalPlayerIsAdmin) Main.NewText("只有房主或管理员可以调整房间刷怪倍率。", 255, 180, 100);
-                _sliderDragging = true;
+                _sliderDragging = true; _spawnSliderKind = kind;
                 UIRenderer.ConsumeClick();
             }
-            if (_sliderDragging)
+            if (_sliderDragging && _spawnSliderKind == kind)
             {
                 Main.LocalPlayer.mouseInterface = true;
                 _sliderPreview = SliderValue(UIRenderer.MouseX, x, width);
-                if (!Main.mouseLeft) { _sliderDragging = false; SubmitSpawnRate(_sliderPreview); }
+                if (!Main.mouseLeft)
+                {
+                    _sliderDragging = false;
+                    SubmitSpawnRate(kind, _sliderPreview);
+                }
             }
-            float value = _sliderDragging ? _sliderPreview : WorldQoLCompletionPatches.SpawnRateMultiplier;
-            int thumb = x + (int)Math.Round(width * value / 100f);
+            float current = kind == 0 ? WorldQoLCompletionPatches.HostileSpawnRateMultiplier : WorldQoLCompletionPatches.CritterSpawnRateMultiplier;
+            float value = _sliderDragging && _spawnSliderKind == kind ? _sliderPreview : current;
+            int thumb = x + (int)Math.Round(width * value / 500f);
             UIRenderer.DrawRect(x, y + height / 2 - 2, width, 4, 55, 80, 115, 255);
             UIRenderer.DrawRect(x, y + height / 2 - 2, Math.Max(0, thumb - x), 4, 80, 170, 240, 255);
             UIRenderer.DrawRect(Math.Max(x, Math.Min(x + width - 8, thumb - 4)), y, 8, height, 170, 220, 255, 255);
+        }
+
+        private static void DrawSpawnPresets(int x, int y, int width, int height, int kind)
+        {
+            float[] presets = { 0f, 1f, 5f, 10f, 20f, 50f, 100f, 200f, 500f };
+            int gap = 3;
+            int buttonWidth = Math.Max(20, (width - gap * (presets.Length - 1)) / presets.Length);
+            for (int i = 0; i < presets.Length; i++)
+            {
+                int buttonX = x + i * (buttonWidth + gap);
+                if (DrawAction(presets[i].ToString("0") + "×", buttonX, y, buttonWidth, height - 5,
+                    Math.Abs((kind == 0 ? WorldQoLCompletionPatches.HostileSpawnRateMultiplier : WorldQoLCompletionPatches.CritterSpawnRateMultiplier) - presets[i]) < 0.01f))
+                    SubmitSpawnRate(kind, presets[i]);
+            }
         }
 
         private static void DrawToggleOption(int x, int y, int w, int h, string label, bool state, int control, Action onToggle)
