@@ -31,6 +31,12 @@ namespace QualityOfTerraria.Features
                     foreach (var property in properties)
                     {
                         string key = property.Key;
+                        if (key == nameof(QualityOfTerrariaConfig.ToolSpeedMultiplier) || key == nameof(QualityOfTerrariaConfig.PlacementSpeedMultiplier))
+                        {
+                            string legacy = key == nameof(QualityOfTerrariaConfig.ToolSpeedMultiplier) ? "DigSpeedBoost" : "PlaceSpeedBoost";
+                            if (raw.TryGetValue(legacy, out object boost)) property.SetValue(config, QualityOfTerrariaConfig.NormalizeSpeed(1f + Convert.ToSingle(boost)));
+                            continue;
+                        }
                         if (key == nameof(QualityOfTerrariaConfig.VeinMiningAutoLoot)) key = "AutoLoot";
                         else if (key == nameof(QualityOfTerrariaConfig.VeinMiningCheckPickaxePower)) key = "CheckPickaxePower";
                         else if (key == nameof(QualityOfTerrariaConfig.VeinMiningMatchExactType)) key = "MatchExactTileType";

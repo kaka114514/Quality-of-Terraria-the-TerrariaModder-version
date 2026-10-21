@@ -126,8 +126,8 @@ namespace QualityOfTerraria.Patches
                 }
                 if (Features.ToolSpeedSystem.SpeedActive)
                 {
-                    __instance.pickSpeed /= Features.ToolSpeedSystem.GetMultiplier(config.DigSpeedBoost);
-                    float placement = Features.ToolSpeedSystem.GetMultiplier(config.PlaceSpeedBoost);
+                    __instance.pickSpeed /= config.ToolSpeedMultiplier;
+                    float placement = config.PlacementSpeedMultiplier;
                     __instance.tileSpeed /= placement;
                     __instance.wallSpeed /= placement;
                 }
@@ -145,7 +145,7 @@ namespace QualityOfTerraria.Patches
                 if (config == null) return;
                 if (sItem.pick > 0 || sItem.axe > 0 || sItem.hammer > 0)
                 {
-                    float multiplier = Features.ToolSpeedSystem.GetMultiplier(sItem.pick > 0 || sItem.hammer > 0 ? config.DigSpeedBoost : config.AxeSpeedBoost);
+                    float multiplier = config.ToolSpeedMultiplier;
                     __instance.itemAnimation = Math.Max(1, (int)(__instance.itemAnimation / multiplier));
                     __instance.itemAnimationMax = Math.Max(1, (int)(__instance.itemAnimationMax / multiplier));
                 }
@@ -163,7 +163,7 @@ namespace QualityOfTerraria.Patches
                 var config = Networking.SettingsSync.GetPlayerConfig(__instance.whoAmI);
                 if (Features.ToolSpeedSystem.SpeedActive && config != null && sItem.pick <= 0 && (sItem.axe > 0 || sItem.hammer > 0))
                 {
-                    float multiplier = Features.ToolSpeedSystem.GetMultiplier(sItem.hammer > 0 ? config.DigSpeedBoost : config.AxeSpeedBoost);
+                    float multiplier = config.ToolSpeedMultiplier;
                     __instance.itemTime = Math.Max(1, (int)(__instance.itemTime / multiplier));
                     __instance.itemTimeMax = __instance.itemTime;
                 }

@@ -37,8 +37,10 @@ namespace QualityOfTerraria.UI
 
         internal static bool DrawConfigRow(int x, int y, int width, ConfigPropertyMeta metadata, ModConfig config, string modId)
         {
+            if (modId != ModId || !ReferenceEquals(config, Mod.Config)) return true;
             int marker = Array.IndexOf(Markers, metadata);
-            if (marker < 0 || modId != ModId || !ReferenceEquals(config, Mod.Config)) return true;
+            // 同步按钮和状态行没有 Property，必须先识别，不能送入真实配置控件读取 Key。
+            if (marker < 0) return SpeedSettingsUI.Draw(x, y, width, metadata, config, modId);
             if (!_enabled) return false;
             bool hover = UIRenderer.MouseX >= x && UIRenderer.MouseX < x + width && UIRenderer.MouseY >= y && UIRenderer.MouseY < y + 28;
             bool blocked = (bool)(BlockInput?.GetValue(null) ?? false);

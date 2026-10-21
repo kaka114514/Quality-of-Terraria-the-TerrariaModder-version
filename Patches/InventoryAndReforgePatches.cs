@@ -12,68 +12,7 @@ namespace QualityOfTerraria.Patches
 {
     public static class InventoryAndReforgePatches
     {
-        // 1. 中键点击背包内便携收纳道具直接打开
-        private static bool _oldMouseMiddle;
-
-        [HarmonyPatch(typeof(Main), "DrawInventory")]
-        public static class InventoryMiddleClickPatch
-        {
-            public static void Postfix()
-            {
-                if (Mod.Config == null || !Mod.Config.MiddleClickOpenBank || !Main.playerInventory)
-                    return;
-
-                bool mouseMiddle = Mouse.GetState().MiddleButton == ButtonState.Pressed;
-                bool middleJustPressed = mouseMiddle && !_oldMouseMiddle;
-                _oldMouseMiddle = mouseMiddle;
-
-                if (!middleJustPressed)
-                    return;
-
-                Player player = Main.LocalPlayer;
-                if (player == null || !player.active || player.dead)
-                    return;
-
-                // 检查鼠标悬停的物品
-                Item hover = Main.HoverItem;
-                if (hover == null || hover.IsAir)
-                    return;
-
-                int bankType = 0;
-                if (hover.type == ItemID.PiggyBank || hover.type == ItemID.MoneyTrough || hover.type == ItemID.ChesterPetItem)
-                {
-                    bankType = -2; // 猪猪钱罐
-                }
-                else if (hover.type == ItemID.Safe)
-                {
-                    bankType = -3; // 保险箱
-                }
-                else if (hover.type == ItemID.DefendersForge)
-                {
-                    bankType = -4; // 护卫熔炉
-                }
-                else if (hover.type == ItemID.VoidVault || hover.type == ItemID.VoidLens)
-                {
-                    bankType = -5; // 虚空保险库
-                }
-
-                if (bankType != 0)
-                {
-                    if (player.chest == bankType)
-                    {
-                        player.chest = -1;
-                        SoundEngine.PlaySound(SoundID.MenuClose);
-                    }
-                    else
-                    {
-                        player.chest = bankType;
-                        SoundEngine.PlaySound(SoundID.MenuOpen);
-                    }
-                }
-            }
-        }
-
-        // 2. 存钱罐/保险箱/虚空袋中信息配件生效
+        // 玩家背包、便携收纳和自己的标记箱子中信息配件生效。
         [HarmonyPatch(typeof(Player), nameof(Player.UpdateEquips))]
         public static class BankInfoAccessoriesPatch
         {
@@ -82,10 +21,12 @@ namespace QualityOfTerraria.Patches
                 if (Mod.Config == null || !Mod.Config.BankInfoAccessories || __instance == null || __instance.whoAmI != Main.myPlayer)
                     return;
 
+                CheckBankArray(__instance, __instance.inventory);
                 CheckBankArray(__instance, __instance.bank?.item);
                 CheckBankArray(__instance, __instance.bank2?.item);
                 CheckBankArray(__instance, __instance.bank3?.item);
                 CheckBankArray(__instance, __instance.bank4?.item);
+                foreach (Chest chest in ExtremeStorageUI.GetMarkedReadableChests()) CheckBankArray(__instance, chest.item);
             }
 
             private static void CheckBankArray(Player player, Item[] items)

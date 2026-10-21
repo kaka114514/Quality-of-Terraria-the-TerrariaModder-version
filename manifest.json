@@ -1,7 +1,7 @@
 {
   "id": "quality-of-terraria",
   "name": "Quality of Terraria 更好的体验",
-  "version": "1.1.3",
+  "version": "1.1.4",
   "framework_version": ">=0.4.1",
   "author": "487666123 / Ported for TerrariaModder",
   "description": "移植自 tModLoader MOD 更好的体验",
@@ -33,8 +33,8 @@
     },
     {
       "id": "open-bank",
-      "label": "随身猪猪钱罐",
-      "description": "无需放置直接打开随身钱罐面板",
+      "label": "打开快捷收纳",
+      "description": "选择猪猪钱罐、保险箱、护卫熔炉或虚空袋，再按快捷键关闭",
       "default": "PERIOD"
     },
     {
@@ -69,8 +69,8 @@
     },
     {
       "id": "spawn-rate-control",
-      "label": "刷怪率与节日控制",
-      "description": "调节0～100倍刷怪率及节日、世界特性；联机由房主／管理员提交",
+      "label": "世界控制",
+      "description": "调节刷怪率、时间、节日和特殊事件；联机由房主／管理员提交",
       "default": "OPENBRACKET"
     },
     {

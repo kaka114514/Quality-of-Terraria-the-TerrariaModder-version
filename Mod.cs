@@ -51,7 +51,7 @@ namespace QualityOfTerraria
             context.RegisterKeybind("liquid-wand", "液体魔杖模式切换", "循环切换关/水/岩浆/微光/蜂蜜模式，按住[;]吸收，按住[']生成", "L", WandsAndTools.ExecuteLiquidWand);
             context.RegisterKeybind("npc-home", "城镇NPC立即回家", "一键将所有城镇NPC召回各自房间", "N", WandsAndTools.ExecuteNPCHome);
             context.RegisterKeybind("quick-nurse", "快捷护士瞬间治疗", "一键护士回满血与魔力并清除Debuff(按原版收费)", "H", WandsAndTools.ExecuteQuickNurse);
-            context.RegisterKeybind("open-bank", "随身猪猪钱罐", "无需放置直接打开随身钱罐面板", "PERIOD", WandsAndTools.ExecuteOpenBank);
+            context.RegisterKeybind("open-bank", "打开快捷收纳", "选择猪猪钱罐、保险箱、护卫熔炉或虚空袋", "PERIOD", WandsAndTools.ExecuteOpenBank);
             context.RegisterKeybind("super-vault", "随身大背包", "呼出100格额外随身独立仓库", "B", UI.SuperVaultUI.Toggle);
 
             // 工具与辅助功能
@@ -61,7 +61,7 @@ namespace QualityOfTerraria
             context.RegisterKeybind("extreme-storage", "终极存储大面板", "呼出集中仓储大面板，支持分类浏览与存取", "K", UI.ExtremeStorageUI.Toggle);
             context.RegisterKeybind("player-stats", "角色实时属性面板", "实时监控各项攻防暴击穿透属性", "Y", UI.PlayerStatsUI.Toggle);
             context.RegisterKeybind("structure-locator", "小地图结构定位球", "打开小地图结构定位面板，快速扫描定位并点亮迷雾", "G", UI.StructureLocatorUI.Toggle);
-            context.RegisterKeybind("spawn-rate-control", "刷怪率与节日控制", "调节0～100倍刷怪率及节日、世界特性；联机由服务器控制", "OPENBRACKET", UI.BuffAndSpawnRateUI.Toggle);
+            context.RegisterKeybind("spawn-rate-control", "世界控制", "调节刷怪率、时间、节日和特殊事件；联机由房主或管理员控制", "OPENBRACKET", UI.BuffAndSpawnRateUI.Toggle);
             context.RegisterKeybind("autofisher", "自动钓鱼机", "背包内有可用鱼竿及鱼饵，在液体附近启用，每10秒尝试一次原版钓鱼结算", "Z", Features.Autofisher.Toggle);
             context.RegisterKeybind("target-dummy", "测试假人桩", "在鼠标处放置或移除测试假人，实时统计DPS", "X", Features.TargetDummySystem.ToggleOrSpawnAtCursor);
             context.RegisterKeybind("toggle-vein-mining", "切换连锁挖矿", "开启或关闭矿石连锁挖掘", "V", Features.VeinMiningSystem.Toggle);
@@ -128,6 +128,7 @@ namespace QualityOfTerraria
             if (!Main.dedServ) UI.UIManager.ResetSession();
             else UI.RemoteStorageSnapshots.ResetSession();
             WorldActive = true;
+            Features.WorldControlSystem.OnWorldLoad();
             _serverSession = Main.netMode == 2;
             if (Main.netMode == 0) LocalWorldSettings.Restore();
             RemoteStorageOperations.Initialize();
@@ -204,6 +205,7 @@ namespace QualityOfTerraria
 
         private void EndSession()
         {
+            if (!Main.dedServ) UI.SpeedSettingsUI.Reset();
             SaveSession();
             WorldActive = false;
             if (!Main.dedServ) UI.UIManager.ResetSession();

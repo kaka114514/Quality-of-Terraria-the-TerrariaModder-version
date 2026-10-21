@@ -13,6 +13,8 @@
 
 ## 回归检查
 
+本轮快捷收纳、标记箱效果、倍率设置与世界控制回归：构建客户端后执行 `pwsh -NoProfile -File tests/PortableStorage.Tests.ps1`，再执行 `pwsh -NoProfile -File tests/RemoteStorage.NonHost.Tests.ps1`。前者使用真实 Terraria/Core/生产程序集验证窗口保活、药水阈值、远程制作站、信息配件、原版服务器扣料、配置迁移、时间边界及房主权限；捕获网络和音效，不代替真实绘制、输入法及双客户端验收。
+
 非房主终极存储回归（2026-10-20）：构建客户端后运行 `pwsh -NoProfile -File tests/RemoteStorage.NonHost.Tests.ps1`。脚本编译 x86 测试程序，使用本机真实 Terraria/Core 和生产 DLL，覆盖普通玩家握手、标记保存、快照物品、远程打开，以及身份、令牌、锁箱和占用保护；网络发送与界面输出被测试捕获，不启动游戏。测试数据仅写入 `bin/nonhost-tests/`。该检查不替代两台实际客户端联机验收。`tests/` 是本地保留文件，不随 GitHub 源码分发。
 
 角色隔离回归也包含在上述脚本中：同安装 ID 的两个角色独立增删、旧列表一次性复制、清空服务端会话后从磁盘恢复、换槽位／安装 ID、空列表不重复迁移、旧客户端缓存不覆盖服务器，以及角色 ID 文件持久化、改名和新角色复用文件名。云端切换只验证 Harmony 挂接，Steam 云端实际读写仍需游戏验收。

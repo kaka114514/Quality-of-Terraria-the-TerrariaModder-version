@@ -28,19 +28,32 @@ namespace QualityOfTerraria.Patches
             if (!infinitePotions && !infiniteStations && !config.InfiniteRedPotion)
                 return;
 
+            var potionCounts = new Dictionary<int, int>();
             foreach (var item in GetAllPlayerItems(__instance))
             {
                 if (item == null || item.IsAir)
                     continue;
 
                 // 1. 无限药水
-                if (infinitePotions && item.type != ItemID.RedPotion && item.buffType > 0 && !Main.debuff[item.buffType] && item.consumable && item.stack >= req)
+                if (infinitePotions && item.type != ItemID.RedPotion && item.buffType > 0 && !Main.debuff[item.buffType] && item.consumable)
                 {
-                    // 给玩家施加 2 秒增益，每帧刷新
-                    __instance.AddBuff(item.buffType, 120, false);
+                    int previous;
+                    potionCounts.TryGetValue(item.type, out previous);
+                    int total = previous + System.Math.Min(item.stack, req);
+                    potionCounts[item.type] = total;
+                    // 同种药水跨格、跨箱累计；每轮达到门槛时只刷新一次。
+                    if (previous < req && total >= req) __instance.AddBuff(item.buffType, 120, false);
                 }
 
-                RedPotionPatches.ApplyInfiniteBuffsForPlayer(__instance, item, config);
+                if (item.type == ItemID.RedPotion)
+                {
+                    int previous;
+                    potionCounts.TryGetValue(item.type, out previous);
+                    int total = previous + System.Math.Min(item.stack, config.RedPotionRequirement);
+                    potionCounts[item.type] = total;
+                    if (previous < config.RedPotionRequirement)
+                        RedPotionPatches.ApplyInfiniteBuffsForPlayer(__instance, item, config, total);
+                }
 
                 // 2. 随身增益站与旗帜
                 if (infiniteStations)

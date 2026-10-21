@@ -35,9 +35,12 @@ namespace QualityOfTerraria.Patches
             ApplyInfiniteBuffsForPlayer(player, item, Mod.Config);
         }
 
-        public static void ApplyInfiniteBuffsForPlayer(Player player, Item item, QualityOfTerrariaConfig config)
+        public static void ApplyInfiniteBuffsForPlayer(Player player, Item item, QualityOfTerrariaConfig config, int totalStack = -1)
         {
-            if (!CanActivateForPlayer(item, config)) return;
+            if (totalStack < 0) { if (!CanActivateForPlayer(item, config)) return; }
+            else if (config == null || !config.InfiniteRedPotion || item == null || item.type != ItemID.RedPotion ||
+                totalStack < System.Math.Max(1, System.Math.Min(300, config.RedPotionRequirement)) ||
+                (!Main.getGoodWorld && !config.RedPotionEverywhere)) return;
             foreach (int buff in ExtendedBuffs) player.AddBuff(buff, 120, false);
         }
 

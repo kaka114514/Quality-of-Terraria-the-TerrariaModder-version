@@ -7,6 +7,7 @@ namespace QualityOfTerraria.Patches
     [HarmonyPatch(typeof(Player), "HandleBeingInChestRange")]
     internal static class RemoteChestRangePatch
     {
-        public static bool Prefix(Player __instance) => !RemoteStorageOperations.KeepRemoteChest(__instance);
+        public static bool Prefix(Player __instance)
+            => !UI.QuickStorageUI.KeepOpen(__instance) && !RemoteStorageOperations.KeepRemoteChest(__instance);
     }
 }

@@ -90,7 +90,10 @@ namespace QualityOfTerraria.Patches
         private static void Add(List<Chest> chests, Chest chest)
         {
             if (chest == null || chests.Contains(chest)) return;
-            chests.Add(chest);
+            // 原版先扣本地容器，再申请服务器材料；插入便携仓库时保留原有相对顺序。
+            int firstRemote = chests.FindIndex(c => !c.bankChest && c.index != Main.LocalPlayer.chest);
+            if (chest.bankChest && firstRemote >= 0) chests.Insert(firstRemote, chest);
+            else chests.Add(chest);
             CollectItems(chest.item, chest.item.Length);
         }
     }

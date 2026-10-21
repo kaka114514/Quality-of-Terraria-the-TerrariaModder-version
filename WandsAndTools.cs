@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using Microsoft.Xna.Framework;
@@ -688,26 +688,8 @@ namespace QualityOfTerraria
             return string.Join(" ", parts);
         }
 
-        // ================= 5. 打开随身钱罐 (. 键) =================
-        public static void ExecuteOpenBank()
-        {
-            if (!Mod.WorldActive || Main.gameMenu) return;
-            Player player = Main.LocalPlayer;
-            if (player == null || !player.active)
-                return;
-
-            if (player.chest == -2)
-            {
-                player.chest = -1;
-                SoundEngine.PlaySound(SoundID.MenuClose);
-            }
-            else
-            {
-                player.chest = -2; // -2 为猪猪钱罐
-                Main.playerInventory = true;
-                SoundEngine.PlaySound(SoundID.MenuOpen);
-            }
-        }
+        // ================= 5. 打开快捷收纳 (. 键) =================
+        public static void ExecuteOpenBank() => QualityOfTerraria.UI.QuickStorageUI.Toggle();
 
         // ================= 7. 气象控制 (U 键) =================
         public static void ExecuteWeatherController()

@@ -16,7 +16,7 @@ namespace QualityOfTerraria
         internal static readonly string[] VeinSettingKeys = {
             nameof(VeinMiningEnabled), nameof(VeinMiningAutoLoot), nameof(VeinMiningRange), nameof(VeinMiningMaxBlocks),
             nameof(VeinMiningCheckPickaxePower), nameof(VeinMiningMatchExactType), nameof(VeinMiningShowMessages),
-            nameof(DigSpeedBoost), nameof(AxeSpeedBoost), nameof(PlaceSpeedBoost)
+            nameof(ToolSpeedMultiplier), nameof(PlacementSpeedMultiplier)
         };
 
         public override int Version
@@ -34,24 +34,29 @@ namespace QualityOfTerraria
                         {
                             var raw = ConfigManager.ParseJsonRaw(File.ReadAllText(FilePath));
                             NeedsVeinMinerImport = !raw.TryGetValue("_version", out object version) || Convert.ToInt32(version) < 3
-                                || VeinSettingKeys.Any(key => !raw.ContainsKey(key));
+                                || VeinSettingKeys.Take(7).Any(key => !raw.ContainsKey(key));
                         }
                         // 自动保存前落盘，导入失败／中断重启后仍能重试；不向配置面板添加状态项。
                         if (NeedsVeinMinerImport) File.WriteAllText(FilePath + ".vein-import.pending", "3");
                     }
                     catch (Exception exception) { VeinImportStateError = exception.Message; }
                 }
-                return 3;
+                return 4;
             }
         }
 
         protected override void Migrate(Dictionary<string, object> raw, int oldVersion)
         {
-            if (raw.TryGetValue("FastToolSpeed", out object speed) && speed is bool fast)
+            if (!raw.ContainsKey(nameof(ToolSpeedMultiplier)))
             {
-                if (!raw.ContainsKey(nameof(DigSpeedBoost))) DigSpeedBoost = fast ? 1 : 0;
-                if (!raw.ContainsKey(nameof(AxeSpeedBoost))) AxeSpeedBoost = fast ? 1 : 0;
-                if (!raw.ContainsKey(nameof(PlaceSpeedBoost))) PlaceSpeedBoost = fast ? 1 : 0;
+                if (raw.TryGetValue("DigSpeedBoost", out object dig)) ToolSpeedMultiplier = 1f + Convert.ToSingle(dig);
+                else if (raw.TryGetValue("AxeSpeedBoost", out object axe)) ToolSpeedMultiplier = 1f + Convert.ToSingle(axe);
+                else if (raw.TryGetValue("FastToolSpeed", out object fast)) ToolSpeedMultiplier = Convert.ToBoolean(fast) ? 2f : 1f;
+            }
+            if (!raw.ContainsKey(nameof(PlacementSpeedMultiplier)))
+            {
+                if (raw.TryGetValue("PlaceSpeedBoost", out object place)) PlacementSpeedMultiplier = 1f + Convert.ToSingle(place);
+                else if (raw.TryGetValue("FastToolSpeed", out object fast)) PlacementSpeedMultiplier = Convert.ToBoolean(fast) ? 2f : 1f;
             }
             if (raw.TryGetValue(nameof(ExtraTileReach), out object reach) && reach is bool enabled)
                 ExtraTileReach = enabled ? 5 : 0;
@@ -68,13 +73,13 @@ namespace QualityOfTerraria
 
         [Client]
         [Label("无限药水增益")]
-        [Description("当背包、随身收纳或自己标记的箱子中药水达到指定数量时，自动获得该药水的无限增益。")]
+        [Description("背包、便携收纳、大背包和自己标记的全世界箱子内，同种药水累计达到所需数量时持续生效，无需打开面板或靠近箱子。")]
         public bool InfinitePotions { get; set; } = true;
 
         [Client]
         [Label("无限药水所需数量")]
         [Range(1, 999)]
-        [Description("药水堆叠数达到此值时激活无限增益（默认30瓶）。")]
+        [Description("同种药水跨格、跨箱累计达到此值时激活增益（默认30瓶）；不消耗药水。")]
         public int PotionStackRequirement { get; set; } = 30;
 
         [Client]
@@ -99,7 +104,7 @@ namespace QualityOfTerraria
 
         [Client]
         [Label("便携制作站")]
-        [Description("背包、随身收纳或自己标记箱子中的制作台（工作台、熔炉、铁砧、炼金台、工匠作坊等）以及水桶/岩浆桶/蜂蜜桶随身生效。")]
+        [Description("开启后，背包、便携收纳、大背包及自己标记的全世界箱子中的制作站和水桶/岩浆桶/蜂蜜桶提供合成环境；关闭仅取消便携环境，箱内材料仍可远程合成。")]
         public bool PortableCraftingStations { get; set; } = true;
 
         [Client]
@@ -133,13 +138,8 @@ namespace QualityOfTerraria
         public bool AnglerQuestNoCD { get; set; } = true;
 
         [Client]
-        [Label("中键打开便携收纳")]
-        [Description("在背包中鼠标中键点击存钱罐、钱币槽、保险箱、护卫熔炉、虚空袋直接打开。")]
-        public bool MiddleClickOpenBank { get; set; } = true;
-
-        [Client]
         [Label("便携收纳信息配件生效")]
-        [Description("存钱罐、保险箱、虚空袋中的信息配件（GPS、雷达、生命体分析仪等）直接生效。")]
+        [Description("玩家背包、钱罐、保险箱、护卫熔炉、虚空袋和自己标记的箱子中的信息配件生效；标记箱不限距离，无需打开面板。")]
         public bool BankInfoAccessories { get; set; } = true;
 
         [Client]
@@ -154,23 +154,21 @@ namespace QualityOfTerraria
         [Description("大幅扩大拾取物品的磁吸范围与吸引速度。")]
         public int ExtraGrabRange { get; set; } = 15;
 
-        [Client]
-        [Label("挖掘速度级别")]
-        [Range(0, 3)]
-        [Description("0、1、2、3分别为原版、2倍、3倍、4倍挖掘速度。")]
-        public int DigSpeedBoost { get; set; } = 2;
+        private float _toolSpeedMultiplier = 3f, _placementSpeedMultiplier = 1f;
+        internal static float NormalizeSpeed(float value)
+            => float.IsNaN(value) || float.IsInfinity(value) ? 1f : (float)Math.Round((decimal)Math.Max(1f, Math.Min(4f, value)), 1, MidpointRounding.AwayFromZero);
 
         [Client]
-        [Label("砍伐速度级别")]
-        [Range(0, 3)]
-        [Description("0、1、2、3分别为原版、2倍、3倍、4倍砍伐速度。")]
-        public int AxeSpeedBoost { get; set; } = 1;
+        [Label("挖掘与伐木加速")]
+        [Range(1, 4)]
+        [Description("镐、斧、锤共用倍率，1.0至4.0倍，步长0.1；拖动滑条或点击右侧数值输入，回车确认。1.0为原版速度。")]
+        public float ToolSpeedMultiplier { get => _toolSpeedMultiplier; set => _toolSpeedMultiplier = NormalizeSpeed(value); }
 
         [Client]
-        [Label("放置速度级别")]
-        [Range(0, 3)]
-        [Description("0、1、2、3分别为原版、2倍、3倍、4倍方块和墙壁放置速度。")]
-        public int PlaceSpeedBoost { get; set; } = 0;
+        [Label("放置加速")]
+        [Range(1, 4)]
+        [Description("方块和背景墙的放置倍率，1.0至4.0倍，步长0.1；拖动滑条或点击右侧数值输入，回车确认。")]
+        public float PlacementSpeedMultiplier { get => _placementSpeedMultiplier; set => _placementSpeedMultiplier = NormalizeSpeed(value); }
 
         [Client]
         [Label("连锁挖矿")]

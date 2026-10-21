@@ -296,9 +296,22 @@ namespace QualityOfTerraria.Networking
                         {
                             if (!PermissionService.IsAdmin(client)) throw new InvalidDataException("节日和世界状态需要房主或服务器管理权限");
                             if (count != 2 || values[0] < 0 || values[0] > 5 || values[1] < 0 || values[1] > 1) throw new InvalidDataException("世界状态请求无效");
-                            bool[] flags = GetWorldFlags(); flags[values[0]] = values[1] != 0; SetWorldFlags(flags);
+                            if (values[0] < 2) Features.WorldControlSystem.SetHoliday(values[0], values[1] != 0);
+                            else { bool[] flags = GetWorldFlags(); flags[values[0]] = values[1] != 0; SetWorldFlags(flags); }
                             NetMessage.SendData(MessageID.WorldData);
                             message = "服务器已确认世界状态";
+                        }
+                        else if (action == "world-time")
+                        {
+                            if (!PermissionService.IsAdmin(client)) throw new InvalidDataException("调整时间需要房主或管理员权限");
+                            if (count != 1) throw new InvalidDataException("时间请求无效");
+                            message = Features.WorldControlSystem.SetTime(values[0]);
+                        }
+                        else if (action == "world-event")
+                        {
+                            if (!PermissionService.IsAdmin(client)) throw new InvalidDataException("特殊事件需要房主或管理员权限");
+                            if (count != 2 || values[1] < 0 || values[1] > 1) throw new InvalidDataException("事件请求无效");
+                            message = Features.WorldControlSystem.SetEvent(values[0], values[1] != 0);
                         }
                         else if (action == "travel-shop")
                         {

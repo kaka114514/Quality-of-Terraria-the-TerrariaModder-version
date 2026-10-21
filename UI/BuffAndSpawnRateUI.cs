@@ -6,6 +6,7 @@ using Terraria.ID;
 using TerrariaModder.Core.UI;
 using QualityOfTerraria.Patches;
 using QualityOfTerraria.Networking;
+using QualityOfTerraria.Features;
 using TerrariaModder.Core.Net;
 
 namespace QualityOfTerraria.UI
@@ -28,6 +29,8 @@ namespace QualityOfTerraria.UI
         public static float SpawnRateMultiplier = 1.0f; // 0.0x ~ 100.0x
         private static bool _sliderDragging;
         private static float _sliderPreview;
+        private static int _tab, _timePreview;
+        private static bool _timeDragging, _timeEdited;
 
         private static void ClampLayout()
         {
@@ -40,7 +43,7 @@ namespace QualityOfTerraria.UI
         {
             IsOpen = false;
             _isDragging = false;
-            _sliderDragging = false;
+            _sliderDragging = _timeDragging = _timeEdited = false;
             UIRenderer.UnregisterPanelBounds(PanelId);
         }
 
@@ -51,12 +54,13 @@ namespace QualityOfTerraria.UI
             IsOpen = !IsOpen;
             if (IsOpen)
             {
+                _timePreview = WorldControlSystem.GetClockMinute(); _timeEdited = false;
                 UIRenderer.BringToFront(PanelId);
                 SoundEngine.PlaySound(SoundID.MenuOpen);
             }
             else
             {
-                _sliderDragging = false;
+                _sliderDragging = _timeDragging = false;
                 UIRenderer.UnregisterPanelBounds(PanelId);
                 SoundEngine.PlaySound(SoundID.MenuClose);
             }
@@ -131,96 +135,106 @@ namespace QualityOfTerraria.UI
                 return;
             }
 
-            // 3. 刷怪率调节区域
-            int y = PanelY + 46;
-            float spacingScale = Math.Min(1f, (PanelHeight - 70) / 274f);
-            int optionHeight = (int)(28 * spacingScale);
-            SpawnRateMultiplier = WorldQoLCompletionPatches.SpawnRateMultiplier;
-            UIRenderer.DrawText($"敌怪生成倍率：{(_sliderDragging ? _sliderPreview : SpawnRateMultiplier):0.#}×", PanelX + 16, y, 255, 230, 120, 255);
-            y += (int)(28 * spacingScale);
-
-            // 快捷倍率按钮
-            float[] presets = { 0.0f, 0.5f, 1.0f, 2.0f, 5.0f, 10.0f, 30.0f, 100.0f };
-            string[] presetLabels = { "0×", "0.5×", "1×", "2×", "5×", "10×", "30×", "100×" };
-            int btnW = (PanelWidth - 32 - (presets.Length - 1) * 4) / presets.Length;
-            int btnH = (int)(24 * spacingScale);
-
-            for (int i = 0; i < presets.Length; i++)
+            int tabY = PanelY + 40, tabWidth = (PanelWidth - 40) / 3;
+            string[] tabs = { "刷怪与时间", "节日与事件", "世界特性" };
+            for (int i = 0; i < tabs.Length; i++)
+                if (DrawAction(tabs[i], PanelX + 12 + i * (tabWidth + 8), tabY, tabWidth, 26, _tab == i))
+                { _tab = i; _sliderDragging = _timeDragging = false; }
+            int y = tabY + 42, x = PanelX + 16, width = PanelWidth - 32;
+            int row = Math.Max(22, Math.Min(32, (PanelHeight - 145) / 6));
+            if (_tab == 0)
             {
-                int bx = PanelX + 16 + i * (btnW + 4);
-                bool isCur = Math.Abs(SpawnRateMultiplier - presets[i]) < 0.05f;
-                bool hover = mouseX >= bx && mouseX <= bx + btnW && mouseY >= y && mouseY <= y + btnH;
-
-                byte r = isCur ? (byte)40 : (hover ? (byte)50 : (byte)26);
-                byte g = isCur ? (byte)120 : (hover ? (byte)70 : (byte)34);
-                byte b = isCur ? (byte)200 : (hover ? (byte)100 : (byte)55);
-
-                UIRenderer.DrawRect(bx, y, btnW, btnH, r, g, b, 255);
-                UIRenderer.DrawRectOutline(bx, y, btnW, btnH, 80, 160, 240, 255, 1);
-                PanelLayout.DrawFittedText(presetLabels[i], bx + 4, y + (btnH - 16) / 2, btnW - 8, 240, 240, 240);
-
-                if (hover && UIRenderer.MouseLeftClick)
+                PanelLayout.DrawFittedText("刷怪倍率：" + WorldQoLCompletionPatches.SpawnRateMultiplier.ToString("0.#") + "×", x, y, width, 255, 230, 120);
+                y += row;
+                float[] presets = { 0, 0.5f, 1, 2, 5, 10, 30, 100 };
+                int buttonWidth = (width - 12) / 4;
+                for (int i = 0; i < presets.Length; i++)
+                    if (DrawAction(presets[i].ToString("0.#") + "×", x + (i % 4) * (buttonWidth + 4), y + (i / 4) * row, buttonWidth, row - 4)) SubmitSpawnRate(presets[i]);
+                y += row * 2;
+                DrawSpawnSlider(x, y + 4, width, 14);
+                y += row;
+                if (!_timeEdited && !_timeDragging) _timePreview = WorldControlSystem.GetClockMinute();
+                PanelLayout.DrawFittedText("时间：" + ClockText(WorldControlSystem.GetClockMinute()) + " → " + ClockText(_timePreview), x, y, width, 190, 225, 255);
+                y += row;
+                DrawTimeSlider(x, y + 4, width - 70, 16);
+                if (DrawAction("应用", x + width - 60, y, 60, 26))
                 {
-                    SubmitSpawnRate(presets[i]);
-                    SoundEngine.PlaySound(SoundID.MenuTick);
-                    UIRenderer.ConsumeClick();
+                    if (Main.netMode == 1) ToolNetwork.Request("world-time", -1, _timePreview);
+                    else ApplyLocal(() => WorldControlSystem.SetTime(_timePreview));
+                    _timeEdited = false;
+                }
+                PanelLayout.DrawFittedText("00:00                         23:59", x, y + 25, width - 70, 160, 180, 205);
+            }
+            else if (_tab == 1)
+            {
+                int half = (width - 10) / 2;
+                DrawToggleOption(x, y, half, row - 4, "万圣节", Main.halloween, 0, () => WorldControlSystem.SetHoliday(0, !Main.halloween));
+                DrawToggleOption(x + half + 10, y, half, row - 4, "圣诞节", Main.xMas, 1, () => WorldControlSystem.SetHoliday(1, !Main.xMas));
+                y += row + 8;
+                PanelLayout.DrawFittedText("特殊事件（夜间：血月／南瓜月／霜月）", x, y, width, 255, 220, 140);
+                y += row;
+                string[] events = { "血月", "日食", "南瓜月", "霜月" };
+                for (int i = 0; i < events.Length; i++)
+                {
+                    bool active = WorldControlSystem.EventActive(i);
+                    PanelLayout.DrawFittedText(events[i] + (active ? "：进行中" : "：未开启"), x, y, width - 80, 215, 235, 250);
+                    if (DrawAction(active ? "结束" : "开始", x + width - 70, y - 3, 70, row - 4, active))
+                    {
+                        int id = i;
+                        if (Main.netMode == 1) ToolNetwork.Request("world-event", -1, id, active ? 0 : 1);
+                        else ApplyLocal(() => WorldControlSystem.SetEvent(id, !active));
+                    }
+                    y += row;
                 }
             }
-
-            DrawSpawnSlider(PanelX + 16, y + btnH + 8, PanelWidth - 32, Math.Max(10, (int)(16 * spacingScale)));
-            y += (int)(44 * spacingScale);
-
-            // 4. 节日强制切换
-            y += (int)(42 * spacingScale);
-            UIRenderer.DrawText("节日事件强制切换：", PanelX + 16, y, 255, 200, 100, 255);
-            y += (int)(26 * spacingScale);
-
-            int optionWidth = (PanelWidth - 48) / 2;
-            int secondX = PanelX + PanelWidth / 2 + 8;
-            DrawToggleOption(PanelX + 16, y, optionWidth, optionHeight, "万圣节", Main.halloween, 0, () =>
+            else
             {
-                Main.halloween = !Main.halloween;
-                SoundEngine.PlaySound(SoundID.MenuTick);
-            });
-
-            DrawToggleOption(secondX, y, optionWidth, optionHeight, "圣诞节", Main.xMas, 1, () =>
-            {
-                Main.xMas = !Main.xMas;
-                SoundEngine.PlaySound(SoundID.MenuTick);
-            });
-
-            // 5. 世界秘密种子特性
-            y += (int)(42 * spacingScale);
-            UIRenderer.DrawText("世界种子机制切换：", PanelX + 16, y, 140, 220, 255, 255);
-            y += (int)(26 * spacingScale);
-
-            DrawToggleOption(PanelX + 16, y, optionWidth, optionHeight, "醉酒世界", Main.drunkWorld, 2, () =>
-            {
-                Main.drunkWorld = !Main.drunkWorld;
-                SoundEngine.PlaySound(SoundID.MenuTick);
-            });
-
-            DrawToggleOption(secondX, y, optionWidth, optionHeight, "天顶世界", Main.zenithWorld, 3, () =>
-            {
-                Main.zenithWorld = !Main.zenithWorld;
-                SoundEngine.PlaySound(SoundID.MenuTick);
-            });
-
-            y += (int)(34 * spacingScale);
-            DrawToggleOption(PanelX + 16, y, optionWidth, optionHeight, "颠倒世界", Main.remixWorld, 4, () =>
-            {
-                Main.remixWorld = !Main.remixWorld;
-                SoundEngine.PlaySound(SoundID.MenuTick);
-            });
-
-            DrawToggleOption(secondX, y, optionWidth, optionHeight, "饥荒世界", Main.dontStarveWorld, 5, () =>
-            {
-                Main.dontStarveWorld = !Main.dontStarveWorld;
-                SoundEngine.PlaySound(SoundID.MenuTick);
-            });
-
+                PanelLayout.DrawFittedText("仅切换运行机制，不重新生成地形", x, y, width, 255, 220, 140);
+                y += row + 8;
+                int half = (width - 10) / 2;
+                DrawToggleOption(x, y, half, row, "醉酒世界", Main.drunkWorld, 2, () => Main.drunkWorld = !Main.drunkWorld);
+                DrawToggleOption(x + half + 10, y, half, row, "天顶世界", Main.zenithWorld, 3, () => Main.zenithWorld = !Main.zenithWorld);
+                y += row + 8;
+                DrawToggleOption(x, y, half, row, "颠倒世界", Main.remixWorld, 4, () => Main.remixWorld = !Main.remixWorld);
+                DrawToggleOption(x + half + 10, y, half, row, "饥荒世界", Main.dontStarveWorld, 5, () => Main.dontStarveWorld = !Main.dontStarveWorld);
+            }
             PanelLayout.DrawFittedText(WorldQoLCompletionPatches.SpawnRateStatus,
-                PanelX + 16, PanelY + PanelHeight - 26, PanelWidth - 32, 180, 200, 220);
+                PanelX + 16, PanelY + PanelHeight - 23, PanelWidth - 32, 180, 200, 220);
+        }
+
+        private static string ClockText(int minute) => (minute / 60).ToString("00") + ":" + (minute % 60).ToString("00");
+
+        private static void ApplyLocal(Func<string> action)
+        {
+            try { Main.NewText(action(), 150, 230, 255); }
+            catch (Exception error) { Main.NewText(error.Message, 255, 180, 100); }
+        }
+
+        private static bool DrawAction(string text, int x, int y, int width, int height, bool selected = false)
+        {
+            bool hover = UIRenderer.MouseX >= x && UIRenderer.MouseX < x + width && UIRenderer.MouseY >= y && UIRenderer.MouseY < y + height;
+            if (hover) Main.LocalPlayer.mouseInterface = true;
+            UIRenderer.DrawRect(x, y, width, height, (byte)(hover ? 50 : 28), (byte)(selected ? 100 : 55), 85, 255);
+            PanelLayout.DrawFittedText(text, x + 5, y + Math.Max(0, (height - 16) / 2), width - 10, 235, 240, 255);
+            if (!hover || !UIRenderer.MouseLeftClick) return false;
+            UIRenderer.ConsumeClick();
+            return true;
+        }
+
+        private static void DrawTimeSlider(int x, int y, int width, int height)
+        {
+            bool hover = UIRenderer.MouseX >= x && UIRenderer.MouseX <= x + width && UIRenderer.MouseY >= y - 3 && UIRenderer.MouseY <= y + height + 3;
+            if (hover && UIRenderer.MouseLeftClick) { _timeDragging = true; UIRenderer.ConsumeClick(); }
+            if (_timeDragging)
+            {
+                Main.LocalPlayer.mouseInterface = true;
+                _timePreview = Math.Max(0, Math.Min(1439, (int)Math.Round((UIRenderer.MouseX - x) * 1439.0 / Math.Max(1, width))));
+                _timeEdited = true;
+                if (!Main.mouseLeft) _timeDragging = false;
+            }
+            int thumb = x + (int)(_timePreview * width / 1439.0);
+            UIRenderer.DrawRect(x, y + height / 2 - 2, width, 4, 55, 80, 115, 255);
+            UIRenderer.DrawRect(Math.Max(x, Math.Min(x + width - 8, thumb - 4)), y, 8, height, 170, 220, 255, 255);
         }
 
         internal static float SliderValue(int mouseX, int x, int width)

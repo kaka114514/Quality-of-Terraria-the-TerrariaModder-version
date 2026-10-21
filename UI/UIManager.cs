@@ -16,6 +16,7 @@ namespace QualityOfTerraria.UI
         {
             if (_initialized) return;
             _initialized = true;
+            RegisterDraw(QuickStorageUI.PanelId, QuickStorageUI.Draw);
             RegisterDraw(ExtremeStorageUI.PanelId, ExtremeStorageUI.Draw);
             RegisterDraw(SuperVaultUI.PanelId, SuperVaultUI.Draw);
             RegisterDraw(PlayerStatsUI.PanelId, PlayerStatsUI.Draw);
@@ -60,6 +61,7 @@ namespace QualityOfTerraria.UI
 
         internal static void ClearClosedPanelBounds()
         {
+            if (!QuickStorageUI.IsOpen) UIRenderer.UnregisterPanelBounds(QuickStorageUI.PanelId);
             if (!ExtremeStorageUI.IsOpen) UIRenderer.UnregisterPanelBounds(ExtremeStorageUI.PanelId);
             if (!SuperVaultUI.IsOpen) UIRenderer.UnregisterPanelBounds(SuperVaultUI.PanelId);
             if (!PlayerStatsUI.IsOpen) UIRenderer.UnregisterPanelBounds(PlayerStatsUI.PanelId);
@@ -71,6 +73,7 @@ namespace QualityOfTerraria.UI
 
         private static void UpdatePanels()
         {
+            QuickStorageUI.Update();
             ExtremeStorageUI.Update();
             SuperVaultUI.Update();
             PlayerStatsUI.Update();
@@ -88,6 +91,7 @@ namespace QualityOfTerraria.UI
 
         public static void ResetSession()
         {
+            QuickStorageUI.ResetSession();
             ExtremeStorageUI.ResetSession();
             SuperVaultUI.ResetSession();
             PlayerStatsUI.ResetSession();
@@ -106,6 +110,7 @@ namespace QualityOfTerraria.UI
         public static void Unload()
         {
             ResetSession();
+            UIRenderer.UnregisterPanelDraw(QuickStorageUI.PanelId);
             UIRenderer.UnregisterPanelDraw(ExtremeStorageUI.PanelId);
             UIRenderer.UnregisterPanelDraw(SuperVaultUI.PanelId);
             UIRenderer.UnregisterPanelDraw(PlayerStatsUI.PanelId);
