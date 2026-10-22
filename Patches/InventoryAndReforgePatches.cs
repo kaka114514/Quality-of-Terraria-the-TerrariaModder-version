@@ -26,10 +26,10 @@ namespace QualityOfTerraria.Patches
                 CheckBankArray(__instance, __instance.bank2?.item);
                 CheckBankArray(__instance, __instance.bank3?.item);
                 CheckBankArray(__instance, __instance.bank4?.item);
-                foreach (Chest chest in ExtremeStorageUI.GetMarkedReadableChests()) CheckBankArray(__instance, chest.item);
+                foreach (Chest chest in ExtremeStorageUI.GetMarkedReadableChests()) CheckBankArray(__instance, chest.item, true);
             }
 
-            private static void CheckBankArray(Player player, Item[] items)
+            private static void CheckBankArray(Player player, Item[] items, bool markedChest = false)
             {
                 if (items == null) return;
                 for (int i = 0; i < items.Length; i++)
@@ -37,10 +37,17 @@ namespace QualityOfTerraria.Patches
                     Item item = items[i];
                     if (item != null && !item.IsAir && item.type != ItemID.EncumberingStone)
                     {
+                        if (markedChest && !ShouldApplyMarkedChestInfoItem(item.type)) continue;
                         player.RefreshInfoAccsFromItemType(item.type);
                         player.RefreshMechanicalAccsFromItemType(item.type);
                     }
                 }
+            }
+
+            internal static bool ShouldApplyMarkedChestInfoItem(int itemType)
+            {
+                // Terraria 1.4.5.8 IDs: The Grand Design, Laser Ruler, Mechanical Lens.
+                return itemType != 3611 && itemType != ItemID.LaserRuler && itemType != ItemID.MechanicalLens;
             }
         }
 

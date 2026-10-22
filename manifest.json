@@ -1,7 +1,7 @@
 {
   "id": "quality-of-terraria",
   "name": "Quality of Terraria 更好的体验",
-  "version": "1.1.6",
+  "version": "1.1.7",
   "framework_version": ">=0.4.1",
   "author": "487666123 / Ported for TerrariaModder",
   "description": "移植自 tModLoader MOD 更好的体验",

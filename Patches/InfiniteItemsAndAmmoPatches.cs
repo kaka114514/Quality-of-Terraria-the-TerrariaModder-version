@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection.Emit;
 using HarmonyLib;
 using Terraria;
 using Terraria.ID;
@@ -38,37 +39,44 @@ namespace QualityOfTerraria.Patches
         [HarmonyPatch(typeof(Player), nameof(Player.PickAmmo))]
         public static class PickAmmoPatch
         {
-            public static void Prefix(Player __instance, Item sItem, ref bool dontConsume)
+            public static bool ShouldPreventAmmoConsumption(Item ammo)
             {
-                if (Mod.Config == null || !Mod.Config.InfiniteAmmo || __instance == null)
-                    return;
+                if (Mod.Config == null || !Mod.Config.InfiniteAmmo || ammo == null || ammo.IsAir)
+                    return false;
 
-                // 检查玩家弹药槽和背包
-                for (int i = 54; i < 58; i++)
+                return ammo.stack >= 3996 || (ammo.type == ItemID.FallenStar && ammo.stack >= 999);
+            }
+
+            public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+            {
+                var code = new List<CodeInstruction>(instructions);
+                var consumableField = AccessTools.Field(typeof(Item), nameof(Item.consumable));
+                int patched = 0;
+
+                for (int i = 0; i < code.Count; i++)
                 {
-                    Item ammo = __instance.inventory[i];
-                    if (ammo != null && !ammo.IsAir && ammo.ammo == sItem.useAmmo)
+                    if (i + 3 < code.Count &&
+                        code[i].opcode == OpCodes.Ldloc_3 &&
+                        (code[i + 1].opcode == OpCodes.Brtrue || code[i + 1].opcode == OpCodes.Brtrue_S) &&
+                        code[i + 2].opcode == OpCodes.Ldloc_0 &&
+                        code[i + 3].opcode == OpCodes.Ldfld &&
+                        Equals(code[i + 3].operand, consumableField))
                     {
-                        if (ammo.stack >= 3996 || (ammo.type == ItemID.FallenStar && ammo.stack >= 999))
+                        code.InsertRange(i + 1, new[]
                         {
-                            dontConsume = true;
-                            return;
-                        }
+                            new CodeInstruction(OpCodes.Ldloc_0),
+                            new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(PickAmmoPatch), nameof(ShouldPreventAmmoConsumption))),
+                            new CodeInstruction(OpCodes.Or)
+                        });
+                        patched++;
+                        i += 4;
                     }
                 }
 
-                for (int i = 0; i < 54; i++)
-                {
-                    Item ammo = __instance.inventory[i];
-                    if (ammo != null && !ammo.IsAir && ammo.ammo == sItem.useAmmo)
-                    {
-                        if (ammo.stack >= 3996 || (ammo.type == ItemID.FallenStar && ammo.stack >= 999))
-                        {
-                            dontConsume = true;
-                            return;
-                        }
-                    }
-                }
+                if (patched != 1)
+                    throw new InvalidOperationException("无法定位 PickAmmo 的最终弹药扣除分支");
+
+                return code;
             }
         }
 

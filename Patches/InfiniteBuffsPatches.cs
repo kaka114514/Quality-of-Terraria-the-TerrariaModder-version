@@ -8,6 +8,51 @@ using QualityOfTerraria.Networking;
 
 namespace QualityOfTerraria.Patches
 {
+    [HarmonyPatch]
+    internal static class ExtendedBuffSlotsPatch
+    {
+        private const int ExtendedCapacity = 400;
+
+        public static void Prefix(Player __instance)
+        {
+            EnsureCapacity(__instance);
+        }
+
+        public static IEnumerable<System.Reflection.MethodBase> TargetMethods()
+        {
+            yield return AccessTools.Method(typeof(Player), nameof(Player.AddBuff), new[] { typeof(int), typeof(int), typeof(bool) });
+            yield return AccessTools.Method(typeof(Player), "AddBuff_ActuallyTryToAddTheBuff");
+            yield return AccessTools.Method(typeof(Player), nameof(Player.UpdateBuffs), new[] { typeof(int) });
+        }
+
+        internal static void EnsureCapacity(Player player)
+        {
+            if (player?.buffType == null || player.buffTime == null) return;
+            var config = SettingsSync.GetPlayerConfig(player.whoAmI);
+            if (config == null && player.whoAmI == Main.myPlayer) config = Mod.Config;
+            int capacity = config?.ExtendedBuffSlots == true ? ExtendedCapacity : Player.maxBuffs;
+            if (player.buffType.Length != capacity) Array.Resize(ref player.buffType, capacity);
+            if (player.buffTime.Length != capacity) Array.Resize(ref player.buffTime, capacity);
+        }
+
+        public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+        {
+            var maxBuffs = AccessTools.Field(typeof(Player), nameof(Player.maxBuffs));
+            var buffType = AccessTools.Field(typeof(Player), nameof(Player.buffType));
+            foreach (var instruction in instructions)
+            {
+                if (instruction.opcode == System.Reflection.Emit.OpCodes.Ldsfld && Equals(instruction.operand, maxBuffs))
+                {
+                    yield return new CodeInstruction(System.Reflection.Emit.OpCodes.Ldarg_0);
+                    yield return new CodeInstruction(System.Reflection.Emit.OpCodes.Ldfld, buffType);
+                    yield return new CodeInstruction(System.Reflection.Emit.OpCodes.Ldlen);
+                    yield return new CodeInstruction(System.Reflection.Emit.OpCodes.Conv_I4);
+                }
+                else yield return instruction;
+            }
+        }
+    }
+
     [HarmonyPatch(typeof(Player), nameof(Player.UpdateBuffs))]
     public static class InfiniteBuffsPatches
     {
@@ -24,12 +69,14 @@ namespace QualityOfTerraria.Patches
             if (config == null) return;
             bool infinitePotions = config.InfinitePotions;
             bool infiniteStations = config.InfiniteStationsAndBanners;
+            bool infiniteWellFed = config.InfiniteWellFed;
             int req = config.PotionStackRequirement;
 
-            if (!infinitePotions && !infiniteStations)
+            if (!infinitePotions && !infiniteStations && !infiniteWellFed)
                 return;
 
             var potionCounts = new Dictionary<int, int>();
+            var foodCounts = new Dictionary<int, int>();
             foreach (var item in GetAllPlayerItems(__instance))
             {
                 if (item == null || item.IsAir)
@@ -37,7 +84,7 @@ namespace QualityOfTerraria.Patches
 
                 // 1. 无限药水
                 if (infinitePotions && item.type != ItemID.RedPotion && !IsPotionBlacklisted(config, item.type) &&
-                    item.buffType > 0 && !Main.debuff[item.buffType] && item.consumable)
+                    item.buffType > 0 && !IsWellFedBuff(item.buffType) && !Main.debuff[item.buffType] && item.consumable)
                 {
                     int previous;
                     potionCounts.TryGetValue(item.type, out previous);
@@ -55,6 +102,16 @@ namespace QualityOfTerraria.Patches
                     potionCounts[item.type] = total;
                     if (previous < config.RedPotionRequirement)
                         RedPotionPatches.ApplyInfiniteBuffsForPlayer(__instance, item, config, total);
+                }
+
+                if (infiniteWellFed && item.consumable && IsWellFedBuff(item.buffType))
+                {
+                    int previous;
+                    foodCounts.TryGetValue(item.type, out previous);
+                    int total = previous + System.Math.Min(item.stack, config.WellFedStackRequirement);
+                    foodCounts[item.type] = total;
+                    if (previous < config.WellFedStackRequirement && total >= config.WellFedStackRequirement)
+                        __instance.AddBuff(item.buffType, 120, false);
                 }
 
                 // 2. 随身增益站与旗帜
@@ -89,6 +146,9 @@ namespace QualityOfTerraria.Patches
                         case ItemID.StarinaBottle:
                             __instance.AddBuff(BuffID.StarInBottle, 120, false);
                             break;
+                        case ItemID.Sunflower:
+                            __instance.AddBuff(BuffID.Sunflower, 120, false);
+                            break;
                     }
 
                     if (item.createTile == TileID.Campfire)
@@ -107,6 +167,11 @@ namespace QualityOfTerraria.Patches
         internal static bool IsPotionBlacklisted(int itemType)
         {
             return IsPotionBlacklisted(Mod.Config, itemType);
+        }
+
+        private static bool IsWellFedBuff(int buffType)
+        {
+            return buffType == BuffID.WellFed || buffType == BuffID.WellFed2 || buffType == BuffID.WellFed3;
         }
 
         internal static bool IsPotionBlacklisted(QualityOfTerrariaConfig config, int itemType)

@@ -85,10 +85,26 @@ namespace QualityOfTerraria
         public bool InfinitePotions { get; set; } = true;
 
         [Client]
+        [Label("增益槽上限提升")]
+        [Description("独立将角色可同时保留的增益数量提高到400；关闭后恢复原版44个槽位，不影响无限药水增益开关。")]
+        public bool ExtendedBuffSlots { get; set; } = true;
+
+        [Client]
         [Label("无限药水所需数量")]
         [Range(1, 999)]
         [Description("同种药水跨格、跨箱累计达到此值时激活增益（默认30瓶）；不消耗药水。")]
         public int PotionStackRequirement { get; set; } = 30;
+
+        [Client]
+        [Label("无限饱食度增益")]
+        [Description("背包、便携收纳、大背包和自己标记的箱子中，同一种食物累计达到所需数量后，持续获得该食物对应的饱食增益；不同食物分别计算。")]
+        public bool InfiniteWellFed { get; set; } = true;
+
+        [Client]
+        [Label("无限饱食度所需数量")]
+        [Range(1, 999)]
+        [Description("同一种食物累计达到此数量时持续获得对应的饱食增益（默认30份）；不消耗食物。")]
+        public int WellFedStackRequirement { get; set; } = 30;
 
         [Client]
         [Label("红药水随处可用")]
@@ -127,7 +143,7 @@ namespace QualityOfTerraria
 
         [Client]
         [Label("随身增益站")]
-        [Description("背包、随身收纳或自己标记箱子中的增益站（灵视水晶球、施法桌、弹药箱、利刃站、蛋糕等）随身生效。")]
+        [Description("背包、随身收纳或自己标记箱子中的增益站（向日葵、灵视水晶球、施法桌、弹药箱、利刃站、蛋糕等）随身生效。")]
         public bool InfiniteStationsAndBanners { get; set; } = true;
 
         [Client]
