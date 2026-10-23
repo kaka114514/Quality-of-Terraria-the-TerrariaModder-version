@@ -85,11 +85,6 @@ namespace QualityOfTerraria
         public bool InfinitePotions { get; set; } = true;
 
         [Client]
-        [Label("增益槽上限提升")]
-        [Description("独立将角色可同时保留的增益数量提高到400；关闭后恢复原版44个槽位，不影响无限药水增益开关。")]
-        public bool ExtendedBuffSlots { get; set; } = true;
-
-        [Client]
         [Label("无限药水所需数量")]
         [Range(1, 999)]
         [Description("同种药水跨格、跨箱累计达到此值时激活增益（默认30瓶）；不消耗药水。")]

@@ -8,51 +8,6 @@ using QualityOfTerraria.Networking;
 
 namespace QualityOfTerraria.Patches
 {
-    [HarmonyPatch]
-    internal static class ExtendedBuffSlotsPatch
-    {
-        private const int ExtendedCapacity = 400;
-
-        public static void Prefix(Player __instance)
-        {
-            EnsureCapacity(__instance);
-        }
-
-        public static IEnumerable<System.Reflection.MethodBase> TargetMethods()
-        {
-            yield return AccessTools.Method(typeof(Player), nameof(Player.AddBuff), new[] { typeof(int), typeof(int), typeof(bool) });
-            yield return AccessTools.Method(typeof(Player), "AddBuff_ActuallyTryToAddTheBuff");
-            yield return AccessTools.Method(typeof(Player), nameof(Player.UpdateBuffs), new[] { typeof(int) });
-        }
-
-        internal static void EnsureCapacity(Player player)
-        {
-            if (player?.buffType == null || player.buffTime == null) return;
-            var config = SettingsSync.GetPlayerConfig(player.whoAmI);
-            if (config == null && player.whoAmI == Main.myPlayer) config = Mod.Config;
-            int capacity = config?.ExtendedBuffSlots == true ? ExtendedCapacity : Player.maxBuffs;
-            if (player.buffType.Length != capacity) Array.Resize(ref player.buffType, capacity);
-            if (player.buffTime.Length != capacity) Array.Resize(ref player.buffTime, capacity);
-        }
-
-        public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
-        {
-            var maxBuffs = AccessTools.Field(typeof(Player), nameof(Player.maxBuffs));
-            var buffType = AccessTools.Field(typeof(Player), nameof(Player.buffType));
-            foreach (var instruction in instructions)
-            {
-                if (instruction.opcode == System.Reflection.Emit.OpCodes.Ldsfld && Equals(instruction.operand, maxBuffs))
-                {
-                    yield return new CodeInstruction(System.Reflection.Emit.OpCodes.Ldarg_0);
-                    yield return new CodeInstruction(System.Reflection.Emit.OpCodes.Ldfld, buffType);
-                    yield return new CodeInstruction(System.Reflection.Emit.OpCodes.Ldlen);
-                    yield return new CodeInstruction(System.Reflection.Emit.OpCodes.Conv_I4);
-                }
-                else yield return instruction;
-            }
-        }
-    }
-
     [HarmonyPatch(typeof(Player), nameof(Player.UpdateBuffs))]
     public static class InfiniteBuffsPatches
     {
