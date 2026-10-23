@@ -88,8 +88,9 @@ namespace QualityOfTerraria.Patches
             {
                 if (Mod.Config != null && Mod.Config.FastExtractinator && __instance != null)
                 {
-                    __instance.itemTime = 0;
-                    __instance.itemAnimation = 0;
+                    // ItemCheck consumes the input only when itemTime == itemTimeMax.
+                    __instance.itemTimeMax = 1;
+                    __instance.itemTime = 1;
                 }
             }
         }

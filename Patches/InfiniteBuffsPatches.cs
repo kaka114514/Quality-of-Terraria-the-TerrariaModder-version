@@ -203,12 +203,34 @@ namespace QualityOfTerraria.Patches
     [HarmonyPatch(typeof(Player), nameof(Player.HasNPCBannerBuff))]
     public static class PortableBannerEffectPatch
     {
+        private sealed class BannerItemCache
+        {
+            public ulong Frame;
+            public HashSet<int> ItemTypes;
+        }
+
+        private static readonly Dictionary<int, BannerItemCache> _bannerItemsByPlayer = new Dictionary<int, BannerItemCache>();
+
         public static void Postfix(Player __instance, int bannerType, ref bool __result)
         {
             if (__result || SettingsSync.GetPlayerConfig(__instance.whoAmI)?.InfiniteStationsAndBanners != true || bannerType <= 0 || bannerType >= BannerSystem.MaxBannerTypes) return;
             int itemType = BannerSystem.BannerToItem(bannerType);
-            foreach (Item item in InfiniteBuffsPatches.GetAllPlayerItems(__instance))
-                if (item.type == itemType) { __result = true; return; }
+            __result = GetBannerItemTypes(__instance).Contains(itemType);
+        }
+
+        internal static HashSet<int> GetBannerItemTypes(Player player)
+        {
+            ulong frame = Main.GameUpdateCount;
+            BannerItemCache cache;
+            if (_bannerItemsByPlayer.TryGetValue(player.whoAmI, out cache) && cache.Frame == frame)
+                return cache.ItemTypes;
+
+            var itemTypes = new HashSet<int>();
+            foreach (Item item in InfiniteBuffsPatches.GetAllPlayerItems(player))
+                if (item.createTile == TileID.Banners) itemTypes.Add(item.type);
+
+            _bannerItemsByPlayer[player.whoAmI] = new BannerItemCache { Frame = frame, ItemTypes = itemTypes };
+            return itemTypes;
         }
     }
 }
