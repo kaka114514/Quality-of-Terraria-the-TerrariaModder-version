@@ -94,7 +94,7 @@ namespace QualityOfTerraria.UI
         private static class VisibilityPatch
         {
             private static void Prefix() { _activeRowDrawn = false; }
-            private static void Postfix() { if (!_activeRowDrawn) Reset(); }
+            private static void Postfix() { if (SettingsSyncUI.ShouldResetSpeedInput(_activeRowDrawn)) Reset(); }
         }
     }
 }

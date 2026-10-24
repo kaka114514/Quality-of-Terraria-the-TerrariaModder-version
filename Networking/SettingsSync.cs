@@ -175,6 +175,7 @@ namespace QualityOfTerraria.Networking
         internal static void RequestSync()
         {
             if (Main.netMode != 1 || _room == null) { Status = "请在联机房间等待设置服务连接完成"; return; }
+            if (!ConfigProfiles.SaveLast()) { Status = "无法将当前设置保存到“上一次”，同步申请未发送"; return; }
             var snapshot = Metadata().ToDictionary(p => p.Key, p => p.GetValue(Mod.Config), StringComparer.Ordinal);
             string error;
             if (!ValidateSnapshot(snapshot, out error)) { Status = error; return; }
@@ -397,6 +398,7 @@ namespace QualityOfTerraria.Networking
             string error;
             if (!ValidateSnapshot(snapshot, out error)) return "个人设置未应用：" + error;
             if (ConfigManager.GetCurrentScope() != ConfigScope.Client) return "个人设置未应用：Core 当前进程无法保存个人配置";
+            if (!ConfigProfiles.SaveLast()) return "个人设置未应用：无法将当前设置保存到“上一次”";
             var personal = Metadata().Where(p => p.Scope == ConfigScope.Client && snapshot.ContainsKey(p.Key)).ToArray();
             var previous = personal.ToDictionary(p => p.Key, p => p.GetValue(Mod.Config));
             try

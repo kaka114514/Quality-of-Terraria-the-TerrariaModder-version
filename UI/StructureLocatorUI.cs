@@ -189,7 +189,7 @@ namespace QualityOfTerraria.UI
                 ("target-dummy", "X", "测试假人桩", "鼠标处生成/移除靶子并测DPS"),
                 ("weather-control", "U", "气象控制切换", "切换下雨和放晴"),
                 ("toggle-vein-mining", "V", "切换连锁挖矿", "相连矿石按范围和数量上限挖掘"),
-                ("toggle-speed-boost", "\\", "切换工具加速", "暂停或恢复挖掘、砍伐和放置加速"),
+                ("toggle-speed-boost", "\\", "切换加速", "暂停或恢复挖掘、伐木、锤击与放置加速"),
                 ("force-vein-mine", "Shift", "强制连锁（按住）", "临时开启连锁，松开保持原开关")
             };
 

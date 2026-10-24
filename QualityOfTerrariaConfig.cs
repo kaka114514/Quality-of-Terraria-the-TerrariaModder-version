@@ -42,7 +42,7 @@ namespace QualityOfTerraria
                     }
                     catch (Exception exception) { VeinImportStateError = exception.Message; }
                 }
-                return 5;
+                return 6;
             }
         }
 
@@ -65,7 +65,6 @@ namespace QualityOfTerraria
             {
                 if (!raw.ContainsKey(nameof(PylonPlacementUnrestricted))) PylonPlacementUnrestricted = universal;
                 if (!raw.ContainsKey(nameof(PylonTeleportWithoutNearbyPlayer))) PylonTeleportWithoutNearbyPlayer = universal;
-                if (!raw.ContainsKey(nameof(PylonTeleportIgnoreDanger))) PylonTeleportIgnoreDanger = universal;
                 if (!raw.ContainsKey(nameof(PylonTeleportIgnoreBiome))) PylonTeleportIgnoreBiome = universal;
             }
             if (!raw.ContainsKey(nameof(InfinitePotionBlacklist)))
@@ -74,6 +73,11 @@ namespace QualityOfTerraria
             {
                 try { HostileSpawnRateMultiplier = Math.Max(0f, Math.Min(500f, Convert.ToSingle(oldSpawn))); }
                 catch { HostileSpawnRateMultiplier = 1f; }
+            }
+            if (!raw.ContainsKey(nameof(HerbIgnoreEnvironment)) && raw.TryGetValue("FastHerbsAndBloom", out object oldHerbSetting))
+            {
+                try { HerbIgnoreEnvironment = Convert.ToBoolean(oldHerbSetting); }
+                catch { HerbIgnoreEnvironment = false; }
             }
         }
 
@@ -159,7 +163,7 @@ namespace QualityOfTerraria
         [Client]
         [Label("召唤物不消耗")]
         [Description("所有Boss与事件召唤物在使用时不消耗；松露虫不消耗；草蛉不消失。")]
-        public bool InfiniteSummonItems { get; set; } = true;
+        public bool InfiniteSummonItems { get; set; } = false;
 
         [Client]
         [Label("无限投掷消耗品")]
@@ -193,12 +197,12 @@ namespace QualityOfTerraria
         [Description("大幅扩大拾取物品的磁吸范围与吸引速度。")]
         public int ExtraGrabRange { get; set; } = 15;
 
-        private float _toolSpeedMultiplier = 3f, _placementSpeedMultiplier = 1f;
+        private float _toolSpeedMultiplier = 3f, _placementSpeedMultiplier = 2f;
         internal static float NormalizeSpeed(float value)
             => float.IsNaN(value) || float.IsInfinity(value) ? 1f : (float)Math.Round((decimal)Math.Max(1f, Math.Min(4f, value)), 1, MidpointRounding.AwayFromZero);
 
         [Client]
-        [Label("挖掘与伐木加速")]
+        [Label("挖掘加速")]
         [Range(1, 4)]
         [Description("镐、斧、锤共用倍率，1.0至4.0倍，步长0.1；拖动滑条或点击右侧数值输入，回车确认。1.0为原版速度。")]
         public float ToolSpeedMultiplier { get => _toolSpeedMultiplier; set => _toolSpeedMultiplier = NormalizeSpeed(value); }
@@ -246,7 +250,7 @@ namespace QualityOfTerraria
         [Label("物块放置与工具触及距离增加量（格）")]
         [Range(0, 30)]
         [Description("在原版范围上增加指定格数，同时作用于物块放置与工具；0不扩展，默认5格。")]
-        public int ExtraTileReach { get; set; } = 5;
+        public int ExtraTileReach { get; set; } = 0;
 
         [Client]
         [Label("魔镜 / 回程瞬传")]
@@ -256,7 +260,7 @@ namespace QualityOfTerraria
         [Client]
         [Label("死亡不生成墓碑")]
         [Description("玩家死亡时不再生成墓碑，保护建筑环境。")]
-        public bool NoTombstones { get; set; } = true;
+        public bool NoTombstones { get; set; } = false;
 
         [Client]
         [Label("死亡保存增益")]
@@ -271,12 +275,12 @@ namespace QualityOfTerraria
         [Client]
         [Label("重生加速（非BOSS战）")]
         [Description("场上无 Boss 时复活时间缩短为 1.5 秒。")]
-        public bool QuickRespawn { get; set; } = true;
+        public bool QuickRespawn { get; set; } = false;
 
         [Client]
         [Label("重生加速（BOSS战）")]
         [Description("BOSS战中复活时间独立缩短为1.5秒，不受非BOSS战开关影响。")]
-        public bool BossQuickRespawn { get; set; } = true;
+        public bool BossQuickRespawn { get; set; } = false;
 
         [Server]
         [Label("禁用伤害浮动")]
@@ -301,7 +305,7 @@ namespace QualityOfTerraria
         [Client]
         [Label("无条件队内传送")]
         [Description("虫洞药水传送无条件，且传送时不消耗虫洞药水。")]
-        public bool TeamUnconditionalTeleport { get; set; } = true;
+        public bool TeamUnconditionalTeleport { get; set; } = false;
 
         // ================= 世界与生态 =================
         [Server]
@@ -319,7 +323,7 @@ namespace QualityOfTerraria
         [Server]
         [Label("禁止邪恶群落蔓延")]
         [Description("彻底禁止腐化、猩红与神圣物块草皮自然扩散。")]
-        public bool NoEvilSpread { get; set; } = true;
+        public bool NoEvilSpread { get; set; } = false;
 
         [Server]
         [Label("晶塔传送无视NPC数量")]
@@ -334,11 +338,6 @@ namespace QualityOfTerraria
         [Server]
         [Label("晶塔传送无需玩家在附近")]
         public bool PylonTeleportWithoutNearbyPlayer { get; set; } = true;
-
-        [Server]
-        [Label("晶塔传送无视危险环境")]
-        [Description("兼容危险判定开关；Terraria 1.4.5.8原版晶塔传送已不检查战斗危险，此版本不额外改变该规则。")]
-        public bool PylonTeleportIgnoreDanger { get; set; } = true;
 
         [Server]
         [Label("晶塔传送无视生物群系")]
@@ -358,7 +357,7 @@ namespace QualityOfTerraria
         [Client]
         [Label("任意放床设重生点")]
         [Description("野外任意放置床即可直接设定为出生点，无需封闭房间要求。")]
-        public bool BedSpawnEverywhere { get; set; } = true;
+        public bool BedSpawnEverywhere { get; set; } = false;
 
         [Client]
         [Label("无视睡觉限制")]
@@ -372,9 +371,19 @@ namespace QualityOfTerraria
         public int BedTimeRate { get; set; } = 20;
 
         [Server]
-        [Label("草药速生与随时开花")]
-        [Description("草药生长速度大幅加快，且允许在任意时刻开花掉落种子。")]
-        public bool FastHerbsAndBloom { get; set; } = true;
+        [Label("草药秒开花")]
+        [Description("保留原版种植和成熟触发；原版触发草药成熟阶段时立即完成。")]
+        public bool HerbInstantBloom { get; set; } = false;
+
+        [Server]
+        [Label("草药加速成熟")]
+        [Description("草药各成熟阶段的原版生长判定提高为5倍；不改变种植与生长触发频率。")]
+        public bool HerbMaturationSpeed { get; set; } = false;
+
+        [Server]
+        [Label("草药无环境限制")]
+        [Description("草药不受原版时间、天气和环境条件限制而开花；成熟采摘始终掉落种子。")]
+        public bool HerbIgnoreEnvironment { get; set; } = true;
 
         [Server]
         [Label("再生之斧自动补种")]
@@ -426,22 +435,22 @@ namespace QualityOfTerraria
         [Server]
         [Label("城镇NPC免伤无敌")]
         [Description("城镇NPC免疫怪物、熔岩和环境伤害，不再意外阵亡。")]
-        public bool TownNPCImmortal { get; set; } = true;
+        public bool TownNPCImmortal { get; set; } = false;
 
         [Server]
         [Label("城镇NPC极速复活")]
         [Description("城镇NPC阵亡后无需长时间等待，满足条件瞬间重新入住。")]
-        public bool TownNPCFastSpawn { get; set; } = true;
+        public bool TownNPCFastSpawn { get; set; } = false;
 
         [Server]
         [Label("城镇NPC自动与夜晚入住")]
         [Description("哥布林、巫师、机械师等满足条件直接入住无需寻找；NPC可在夜晚入住。")]
-        public bool TownNPCConvenientMoveIn { get; set; } = true;
+        public bool TownNPCConvenientMoveIn { get; set; } = false;
 
         [Server]
         [Label("城镇NPC可住邪恶环境")]
         [Description("房屋处于腐化或猩红之地时依然判定为有效住房。")]
-        public bool TownNPCLiveInEvil { get; set; } = true;
+        public bool TownNPCLiveInEvil { get; set; } = false;
 
         [Client]
         [Label("固定最高NPC快乐度")]
@@ -451,7 +460,7 @@ namespace QualityOfTerraria
         [Server]
         [Label("旅商永不离开")]
         [Description("旅商入住后除非死亡不会离开世界。")]
-        public bool TravellingMerchantStays { get; set; } = true;
+        public bool TravellingMerchantStays { get; set; } = false;
 
         [Client]
         [Label("一次击杀完全解锁图鉴")]
@@ -466,7 +475,7 @@ namespace QualityOfTerraria
         [Server]
         [Label("熔岩史莱姆不产生岩浆")]
         [Description("专家/大师模式下熔岩史莱姆死亡时不再生成熔岩。")]
-        public bool LavalessLavaSlime { get; set; } = true;
+        public bool LavalessLavaSlime { get; set; } = false;
 
         // ================= 快捷工具与魔杖 =================
         [Client]

@@ -1,7 +1,7 @@
 {
   "id": "quality-of-terraria",
   "name": "Quality of Terraria 更好的体验",
-  "version": "1.1.8",
+  "version": "1.2.0",
   "framework_version": ">=0.4.1",
   "author": "487666123 / Ported for TerrariaModder",
   "description": "移植自 tModLoader MOD 更好的体验",
@@ -76,7 +76,7 @@
     {
       "id": "autofisher",
       "label": "自动钓鱼机",
-      "description": "背包内有可用鱼竿及鱼饵，在液体附近启用，每10秒尝试一次原版钓鱼结算",
+      "description": "背包内有可用鱼竿及鱼饵，在液体附近启用，间隔可在模组设置中调整",
       "default": "Z"
     },
     {
@@ -93,8 +93,8 @@
     },
     {
       "id": "toggle-speed-boost",
-      "label": "切换工具加速",
-      "description": "暂停或恢复挖掘、砍伐和放置速度加成",
+      "label": "切换加速",
+      "description": "暂停或恢复挖掘、伐木、锤击与放置加速",
       "default": "Backslash"
     },
     {

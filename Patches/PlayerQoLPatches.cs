@@ -150,14 +150,6 @@ namespace QualityOfTerraria.Patches
             {
                 if (!Mod.WorldActive || Mod.Config == null || __instance == null || __instance.whoAmI != Main.myPlayer || sItem == null)
                     return;
-                // 镐由原版 pickSpeed 计算使用间隔；斧和锤走 ApplyItemTime。
-                var config = Networking.SettingsSync.GetPlayerConfig(__instance.whoAmI);
-                if (Features.ToolSpeedSystem.SpeedActive && config != null && sItem.pick <= 0 && (sItem.axe > 0 || sItem.hammer > 0))
-                {
-                    float multiplier = config.ToolSpeedMultiplier;
-                    __instance.itemTime = Math.Max(1, (int)(__instance.itemTime / multiplier));
-                    __instance.itemTimeMax = __instance.itemTime;
-                }
                 if (!Mod.Config.InstantRecall || __instance.itemAnimation <= 0) return;
                 int trigger;
                 int type = sItem.type;
@@ -177,6 +169,48 @@ namespace QualityOfTerraria.Patches
                     // 同步缩短动画，避免时间提前耗尽后在同一动画中再次传送/扣药水。
                     __instance.itemAnimation = Math.Max(1, __instance.itemAnimation - skipped);
                 }
+            }
+        }
+
+        [HarmonyPatch(typeof(Player), "ItemCheck_UseMiningTools_ActuallyUseMiningTool")]
+        public static class MiningToolUseSpeedPatch
+        {
+            public static void Postfix(Player __instance, Item sItem)
+            {
+                if (!Mod.WorldActive || __instance == null || __instance.whoAmI != Main.myPlayer || sItem == null ||
+                    sItem.axe <= 0 || !Features.ToolSpeedSystem.SpeedActive)
+                    return;
+
+                var config = Networking.SettingsSync.GetPlayerConfig(__instance.whoAmI);
+                if (config == null) return;
+                int interval = Math.Max(1, (int)(__instance.itemTime / config.ToolSpeedMultiplier));
+                __instance.itemTime = interval;
+                __instance.itemTimeMax = interval;
+            }
+        }
+
+        [HarmonyPatch]
+        public static class HammerToolTimeSpeedPatch
+        {
+            public static IEnumerable<System.Reflection.MethodBase> TargetMethods()
+            {
+                yield return HarmonyLib.AccessTools.Method(typeof(Player), "ItemCheck_UseMiningTools_TryPoundingTile");
+                yield return HarmonyLib.AccessTools.Method(typeof(Player), "ItemCheck_UseMiningTools_TryHittingWall");
+            }
+
+            public static void Postfix(Player __instance, Item sItem)
+            {
+                if (!Mod.WorldActive || __instance == null || __instance.whoAmI != Main.myPlayer || sItem == null ||
+                    sItem.hammer <= 0 || !Features.ToolSpeedSystem.SpeedActive)
+                    return;
+                var config = Networking.SettingsSync.GetPlayerConfig(__instance.whoAmI);
+                if (config == null) return;
+                // 两个原版锤击方法都在这里写入 itemTime，外层随后会把它复制到 toolTime。
+                // 只缩短本次成功使用产生的间隔，避免每帧重复除倍率。
+                if (__instance.itemTime <= 0) return;
+                int interval = Math.Max(1, (int)(__instance.itemTime / config.ToolSpeedMultiplier));
+                __instance.itemTime = interval;
+                __instance.itemTimeMax = interval;
             }
         }
 

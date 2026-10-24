@@ -2,7 +2,7 @@
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
     <AssemblyName>QualityOfTerraria.Server</AssemblyName>
-    <Version>1.1.8</Version>
+    <Version>1.2.0</Version>
     <RootNamespace>QualityOfTerraria</RootNamespace>
     <OutputType>Library</OutputType>
     <LangVersion>latest</LangVersion>

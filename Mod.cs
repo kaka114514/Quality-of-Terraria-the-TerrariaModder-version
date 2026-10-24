@@ -42,6 +42,7 @@ namespace QualityOfTerraria
             _instance = this;
             _context = context;
             Config = context.GetConfig<QualityOfTerrariaConfig>();
+            ConfigProfiles.Initialize();
             VeinMinerLegacyLoaded = context.IsModLoaded("vein-miner");
             LocalWorldSettings.Initialize();
             Features.VeinConfigMigration.Apply(context);
@@ -62,10 +63,10 @@ namespace QualityOfTerraria
             context.RegisterKeybind("player-stats", "角色实时属性面板", "实时监控各项攻防暴击穿透属性", "Y", UI.PlayerStatsUI.Toggle);
             context.RegisterKeybind("structure-locator", "小地图结构定位球", "打开小地图结构定位面板，快速扫描定位并点亮迷雾", "G", UI.StructureLocatorUI.Toggle);
             context.RegisterKeybind("spawn-rate-control", "世界控制", "调节刷怪率、时间、节日和特殊事件；联机由房主或管理员控制", "OPENBRACKET", UI.BuffAndSpawnRateUI.Toggle);
-            context.RegisterKeybind("autofisher", "自动钓鱼机", "背包内有可用鱼竿及鱼饵，在液体附近启用，每10秒尝试一次原版钓鱼结算", "Z", Features.Autofisher.Toggle);
+            context.RegisterKeybind("autofisher", "自动钓鱼机", "背包内有可用鱼竿及鱼饵，在液体附近启用，间隔可在模组设置中调整", "Z", Features.Autofisher.Toggle);
             context.RegisterKeybind("target-dummy", "测试假人桩", "在鼠标处放置或移除测试假人，实时统计DPS", "X", Features.TargetDummySystem.ToggleOrSpawnAtCursor);
             context.RegisterKeybind("toggle-vein-mining", "切换连锁挖矿", "开启或关闭矿石连锁挖掘", "V", Features.VeinMiningSystem.Toggle);
-            context.RegisterKeybind("toggle-speed-boost", "切换工具加速", "切换挖掘、砍伐和放置加速，不改变各自速度设置", "Backslash", Features.ToolSpeedSystem.Toggle);
+            context.RegisterKeybind("toggle-speed-boost", "切换加速", "暂停或恢复挖掘、伐木、锤击与放置加速，不改变倍率设置", "Backslash", Features.ToolSpeedSystem.Toggle);
             context.RegisterKeybind("force-vein-mine", "强制连锁挖矿（按住）", "按住此键挖矿，临时启用连锁；松开恢复原开关", "LeftShift", null);
 
             if (!context.IsServer) UI.UIManager.Initialize();
@@ -219,6 +220,7 @@ namespace QualityOfTerraria
             _serverSession = false;
             RemoteStorageOperations.ResetSession();
             SettingsSync.ResetSession();
+            ConfigProfiles.Reset();
             ToolNetwork.ResetSession();
             FeatureNetwork.ResetSession();
             VeinMiningNetwork.ResetSession();

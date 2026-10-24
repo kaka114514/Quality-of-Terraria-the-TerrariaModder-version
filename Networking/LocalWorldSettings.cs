@@ -33,8 +33,10 @@ namespace QualityOfTerraria.Networking
                         var legacy = ConfigManager.ParseJsonRaw(File.ReadAllText(Mod.Config.FilePath));
                         foreach (var property in Properties)
                         {
-                            object value;
-                            if (legacy.TryGetValue(property.Key, out value) && value != null)
+                            object value = null;
+                            if (!legacy.TryGetValue(property.Key, out value) && property.Key == nameof(QualityOfTerrariaConfig.HerbIgnoreEnvironment))
+                                legacy.TryGetValue("FastHerbsAndBloom", out value);
+                            if (value != null)
                                 _values[property.Key] = Convert.ChangeType(value, property.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
                         }
                     }
@@ -65,6 +67,7 @@ namespace QualityOfTerraria.Networking
                 }
                 if (result.ContainsKey(key)) throw new InvalidDataException("单机世界配置包含重复键");
                 ConfigPropertyMeta property;
+                if (key == "FastHerbsAndBloom") key = nameof(QualityOfTerrariaConfig.HerbIgnoreEnvironment);
                 if (properties.TryGetValue(key, out property))
                 {
                     if (value.GetType() != property.PropertyType) throw new InvalidDataException("单机世界配置类型不匹配");

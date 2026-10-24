@@ -12,7 +12,7 @@ namespace QualityOfTerraria.Features
             if (!Mod.WorldActive || Mod.VeinMinerLegacyLoaded) return;
             Enabled = !Enabled;
             if (Mod.Config?.VeinMiningShowMessages == true)
-                Main.NewText(Enabled ? "工具速度加成已开启" : "工具速度加成已关闭");
+                Main.NewText(Enabled ? "工具与放置加速已开启" : "工具与放置加速已关闭");
         }
 
         internal static void ResetSession() => Enabled = true;
