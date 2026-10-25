@@ -142,48 +142,7 @@ namespace QualityOfTerraria.Patches
             }
         }
 
-        // 6. 再生之斧 / 再生法杖收割草药时自动补种
-        [HarmonyPatch(typeof(WorldGen), nameof(WorldGen.KillTile))]
-        public static class AutoReplantPatch
-        {
-            private static int _savedHerbStyle = -1;
-            private static int _savedHerbType = -1;
-
-            public static void Prefix(int i, int j, bool fail, bool effectOnly, bool noItem)
-            {
-                if (Mod.Config == null || !Mod.Config.StaffOfRegrowthReplant || fail || effectOnly)
-                    return;
-
-                Player player = Main.LocalPlayer;
-                if (player == null || player.HeldItem == null)
-                    return;
-
-                if (player.HeldItem.type != ItemID.StaffofRegrowth && player.HeldItem.type != ItemID.AcornAxe)
-                    return;
-
-                Tile tile = Main.tile[i, j];
-                if (tile != null && tile.active() && (tile.type == TileID.BloomingHerbs || tile.type == TileID.MatureHerbs))
-                {
-                    _savedHerbType = TileID.ImmatureHerbs;
-                    _savedHerbStyle = tile.frameX / 18;
-                }
-            }
-
-            public static void Postfix(int i, int j, bool fail, bool effectOnly, bool noItem)
-            {
-                if (Mod.Config == null || !Mod.Config.StaffOfRegrowthReplant)
-                    return;
-
-                if (_savedHerbStyle >= 0 && _savedHerbType >= 0)
-                {
-                    WorldGen.PlaceTile(i, j, _savedHerbType, true, false, -1, _savedHerbStyle);
-                    _savedHerbStyle = -1;
-                    _savedHerbType = -1;
-                }
-            }
-        }
-
-        // 7. 失焦后台持续运行
+        // 6. 失焦后台持续运行
         [HarmonyPatch(typeof(Microsoft.Xna.Framework.Game), "get_IsActive")]
         public static class KeepFocusPatch
         {

@@ -67,7 +67,7 @@ namespace QualityOfTerraria.UI
                 nameof(QualityOfTerrariaConfig.PylonTeleportIgnoreBiome), nameof(QualityOfTerrariaConfig.CoinDropMultiplier),
                 nameof(QualityOfTerrariaConfig.RefreshTravelShop), nameof(QualityOfTerrariaConfig.BedTimeRate),
                 nameof(QualityOfTerrariaConfig.HerbInstantBloom), nameof(QualityOfTerrariaConfig.HerbMaturationSpeed),
-                nameof(QualityOfTerrariaConfig.HerbIgnoreEnvironment), nameof(QualityOfTerrariaConfig.StaffOfRegrowthReplant),
+                nameof(QualityOfTerrariaConfig.HerbIgnoreEnvironment),
                 nameof(QualityOfTerrariaConfig.FastTreeGrowth), nameof(QualityOfTerrariaConfig.ShakeTreeAlwaysFruit),
                 nameof(QualityOfTerrariaConfig.GemTreeAlwaysGem), nameof(QualityOfTerrariaConfig.FastPumpkinGrowth),
                 nameof(QualityOfTerrariaConfig.FastLifeFruitGrowth)
@@ -169,9 +169,11 @@ namespace QualityOfTerraria.UI
 
         private static void AddProfileRows(List<ValueTuple<string, object, ModInfo>> rows, ModInfo source)
         {
-            if (!_enabled) return;
-            int count = 2 + Math.Min(4, SettingsSync.Requests.Count);
-            for (int i = 0; i < count; i++) rows.Add(ValueTuple.Create("property", (object)Markers[i], source));
+            if (_enabled)
+            {
+                int count = 2 + Math.Min(4, SettingsSync.Requests.Count);
+                for (int i = 0; i < count; i++) rows.Add(ValueTuple.Create("property", (object)Markers[i], source));
+            }
             rows.Add(ValueTuple.Create("property", (object)Markers[6], source));
             rows.Add(ValueTuple.Create("property", (object)Markers[7], source));
         }
@@ -185,9 +187,9 @@ namespace QualityOfTerraria.UI
             int marker = Array.IndexOf(Markers, metadata);
             // 同步按钮和状态行没有 Property，必须先识别，不能送入真实配置控件读取 Key。
             if (marker < 0) return SpeedSettingsUI.Draw(x, y, width, metadata, config, modId);
-            if (!_enabled) return false;
             if (marker == 6) return DrawProfiles(x, y, width);
             if (marker == 7) return DrawProfileActions(x, y, width);
+            if (!_enabled) return false;
             bool hover = UIRenderer.MouseX >= x && UIRenderer.MouseX < x + width && UIRenderer.MouseY >= y && UIRenderer.MouseY < y + 28;
             bool blocked = (bool)(BlockInput?.GetValue(null) ?? false);
             if (hover && Mod.WorldActive) Main.player[Main.myPlayer].mouseInterface = true;
@@ -373,6 +375,21 @@ namespace QualityOfTerraria.UI
                 { instruction.opcode = OpCodes.Call; instruction.operand = replacement; }
                 yield return instruction;
             }
+        }
+    }
+
+    [HarmonyPatch(typeof(ModMenu), "AutoSaveConfig")]
+    internal static class ServerConfigSavePatch
+    {
+        private static void Postfix(string modId, ConfigPropertyMeta changedMeta, ModConfig changedConfig)
+        {
+            if (modId != "quality-of-terraria" || !ReferenceEquals(changedConfig, Mod.Config) || changedMeta == null ||
+                changedMeta.Scope != ConfigScope.Server || ConfigManager.GetCurrentScope() != ConfigScope.Client ||
+                (Main.netMode != 0 && !Netplay.IsHostAndPlay)) return;
+
+            string error;
+            if (!Networking.LocalWorldSettings.Save(out error))
+                Main.NewText("服务器设置保存失败：" + error, 255, 120, 100);
         }
     }
 

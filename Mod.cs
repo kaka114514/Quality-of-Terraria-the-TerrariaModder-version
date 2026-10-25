@@ -220,7 +220,6 @@ namespace QualityOfTerraria
             _serverSession = false;
             RemoteStorageOperations.ResetSession();
             SettingsSync.ResetSession();
-            ConfigProfiles.Reset();
             ToolNetwork.ResetSession();
             FeatureNetwork.ResetSession();
             VeinMiningNetwork.ResetSession();

@@ -59,11 +59,22 @@ namespace QualityOfTerraria.UI
                 int type = Convert.ToInt32(field.GetValue(null));
                 Item item = new Item();
                 item.SetDefaults(type);
-                if (type != ItemID.RedPotion && (item.buffType <= 0 || item.buffType >= Main.debuff.Length || Main.debuff[item.buffType] || !item.consumable)) continue;
+                if (type != ItemID.RedPotion && !Patches.InfiniteBuffsPatches.IsPotionCandidate(item)) continue;
                 if (Candidates.Any(existing => existing.type == type)) continue;
                 item.stack = 1;
                 Candidates.Add(item);
             }
+            AddSpecialCandidate(ItemID.Ale);
+            AddSpecialCandidate(ItemID.Sake);
+        }
+
+        private static void AddSpecialCandidate(int type)
+        {
+            if (Candidates.Any(existing => existing.type == type)) return;
+            Item item = new Item();
+            item.SetDefaults(type);
+            item.stack = 1;
+            Candidates.Add(item);
         }
 
         internal static void AddRows(List<ValueTuple<string, object, ModInfo>> rows, ValueTuple<string, object, ModInfo> source)

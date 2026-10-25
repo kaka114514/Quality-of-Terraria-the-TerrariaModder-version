@@ -35,7 +35,9 @@ namespace QualityOfTerraria
             {
                 if (File.Exists(_path))
                 {
-                    var file = ReadFile(_path);
+                    FileModel file;
+                    try { file = ReadFile(_path); }
+                    catch when (File.Exists(_path + ".bak")) { file = ReadFile(_path + ".bak"); }
                     if (file != null && file.Version == FormatVersion && file.Profiles != null)
                         _profiles = file.Profiles.Where(IsValidProfile).Select(Clone).ToList();
                 }
@@ -93,9 +95,30 @@ namespace QualityOfTerraria
             message = null;
             var profile = _profiles.FirstOrDefault(p => p.Name == _selectedName);
             if (profile == null) { message = "配置档案不存在"; return false; }
+            string sourceName = _selectedName;
             var snapshot = new Dictionary<string, string>(profile.Values, StringComparer.Ordinal);
             if (!SaveLast()) { message = "无法保存当前设置到“上一次”"; return false; }
-            return Apply(snapshot, out message);
+            if (!Apply(snapshot, out message)) return false;
+
+            var defaults = _profiles.FirstOrDefault(p => p.Name == "默认");
+            if (defaults == null)
+            {
+                message = "配置已应用，但默认配置不存在";
+                return false;
+            }
+            var previousDefault = defaults.Values;
+            string previousSelected = _selectedName;
+            defaults.Values = new Dictionary<string, string>(snapshot, StringComparer.Ordinal);
+            _selectedName = "默认";
+            if (!SaveFile())
+            {
+                defaults.Values = previousDefault;
+                _selectedName = previousSelected;
+                message = "配置已应用，但默认配置保存失败";
+                return false;
+            }
+            message = "已应用配置：" + sourceName + "，并更新默认配置";
+            return true;
         }
 
         internal static bool RenameSelected(string name, out string error)
@@ -250,10 +273,19 @@ namespace QualityOfTerraria
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(_path));
                 var serializer = new DataContractJsonSerializer(typeof(FileModel));
-                using (var stream = File.Create(_path)) serializer.WriteObject(stream, new FileModel { Version = FormatVersion, Profiles = _profiles });
+                string temp = _path + ".tmp";
+                using (var stream = File.Create(temp)) serializer.WriteObject(stream, new FileModel { Version = FormatVersion, Profiles = _profiles });
+                if (File.Exists(_path)) File.Replace(temp, _path, _path + ".bak");
+                else File.Move(temp, _path);
                 return true;
             }
             catch (Exception error) { Mod.LogError("保存配置档案失败", error); return false; }
+            finally
+            {
+                string temp = _path + ".tmp";
+                try { if (File.Exists(temp)) File.Delete(temp); }
+                catch (Exception error) { Mod.LogError("清理配置档案临时文件失败", error); }
+            }
         }
 
         [DataContract]

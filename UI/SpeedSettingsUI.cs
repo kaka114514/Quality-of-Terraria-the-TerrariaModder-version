@@ -60,7 +60,10 @@ namespace QualityOfTerraria.UI
             }
             if (_dragKey == meta.Key)
             {
-                _preview = QualityOfTerrariaConfig.NormalizeSpeed(1f + (mx - sliderX) * 3f / sliderWidth);
+                float range = meta.Key == nameof(QualityOfTerrariaConfig.PlacementSpeedMultiplier) ? 1.5f : 3f;
+                _preview = meta.Key == nameof(QualityOfTerrariaConfig.PlacementSpeedMultiplier)
+                    ? QualityOfTerrariaConfig.NormalizePlacementSpeed(1f + (mx - sliderX) * range / sliderWidth)
+                    : QualityOfTerrariaConfig.NormalizeToolSpeed(1f + (mx - sliderX) * range / sliderWidth);
                 if (!UIRenderer.MouseLeft || blocked) { if (!blocked) Commit(meta, config, modId, _preview); _dragKey = null; }
             }
             if (!blocked && fieldHover && UIRenderer.MouseLeftClick)
@@ -70,7 +73,8 @@ namespace QualityOfTerraria.UI
                 UIRenderer.ClearInput(); UIRenderer.RegisterKeyInputBlock(InputId); UIRenderer.ConsumeClick();
             }
             float shown = _dragKey == meta.Key ? _preview : Convert.ToSingle(meta.GetValue(config));
-            int thumb = sliderX + (int)((shown - 1f) * sliderWidth / 3f);
+            float displayRange = meta.Key == nameof(QualityOfTerrariaConfig.PlacementSpeedMultiplier) ? 1.5f : 3f;
+            int thumb = sliderX + (int)((shown - 1f) * sliderWidth / displayRange);
             UIRenderer.DrawRect(sliderX, y + 11, sliderWidth, 4, 55, 80, 115, 255);
             UIRenderer.DrawRect(thumb - 3, y + 5, 6, 16, 170, 220, 255, 255);
             UIRenderer.DrawRect(fieldX, y + 2, 70, 22, 28, 50, 75, 255);
@@ -80,7 +84,10 @@ namespace QualityOfTerraria.UI
 
         private static void Commit(ConfigPropertyMeta meta, ModConfig config, string modId, float value)
         {
-            meta.SetValue(config, QualityOfTerrariaConfig.NormalizeSpeed(value));
+            object normalized = meta.Key == nameof(QualityOfTerrariaConfig.PlacementSpeedMultiplier)
+                ? (object)QualityOfTerrariaConfig.NormalizePlacementSpeed(value)
+                : QualityOfTerrariaConfig.NormalizeToolSpeed(value);
+            meta.SetValue(config, normalized);
             SaveConfig.Invoke(null, new object[] { modId, meta, config });
         }
 

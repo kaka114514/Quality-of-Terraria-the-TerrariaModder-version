@@ -54,6 +54,8 @@ if (Test-Path -LiteralPath $targetServer) {
 Copy-Item -LiteralPath $outputDll -Destination $targetDll -Force
 Copy-Item -LiteralPath $outputServer -Destination $targetServer -Force
 Copy-Item -LiteralPath (Join-Path $projectDir 'manifest.json') -Destination (Join-Path $targetModDir 'manifest.json') -Force
+Copy-Item -LiteralPath (Join-Path $projectDir 'README.md') -Destination (Join-Path $targetModDir 'README.md') -Force
+Copy-Item -LiteralPath (Join-Path $projectDir 'UPDATE_LOG.md') -Destination (Join-Path $targetModDir 'UPDATE_LOG.md') -Force
 Write-Host ""
 Write-Host "==========================================" -ForegroundColor Green
 Write-Host "✅ 构建并部署成功！" -ForegroundColor Green

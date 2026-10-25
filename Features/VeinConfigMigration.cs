@@ -34,7 +34,13 @@ namespace QualityOfTerraria.Features
                         if (key == nameof(QualityOfTerrariaConfig.ToolSpeedMultiplier) || key == nameof(QualityOfTerrariaConfig.PlacementSpeedMultiplier))
                         {
                             string legacy = key == nameof(QualityOfTerrariaConfig.ToolSpeedMultiplier) ? "DigSpeedBoost" : "PlaceSpeedBoost";
-                            if (raw.TryGetValue(legacy, out object boost)) property.SetValue(config, QualityOfTerrariaConfig.NormalizeSpeed(1f + Convert.ToSingle(boost)));
+                            if (raw.TryGetValue(legacy, out object boost))
+                            {
+                                float normalizedValue = 1f + Convert.ToSingle(boost);
+                                property.SetValue(config, property.Key == nameof(QualityOfTerrariaConfig.PlacementSpeedMultiplier)
+                                    ? QualityOfTerrariaConfig.NormalizePlacementSpeed(normalizedValue)
+                                    : QualityOfTerrariaConfig.NormalizeToolSpeed(normalizedValue));
+                            }
                             continue;
                         }
                         if (key == nameof(QualityOfTerrariaConfig.VeinMiningAutoLoot)) key = "AutoLoot";

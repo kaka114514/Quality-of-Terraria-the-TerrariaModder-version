@@ -5,8 +5,11 @@ using System.Reflection;
 using System.Reflection.Emit;
 using HarmonyLib;
 using Terraria;
+using Terraria.DataStructures;
 using Terraria.GameContent;
+using Terraria.GameContent.Tile_Entities;
 using Terraria.ID;
+using Terraria.Map;
 
 namespace QualityOfTerraria.Patches
 {
@@ -40,6 +43,44 @@ namespace QualityOfTerraria.Patches
                 {
                     __result = true; // 玩家无需靠近晶塔即可传送
                 }
+            }
+        }
+
+        // 晶塔便利功能开启时，地图应显示世界中已登记的晶塔；原版地图层默认只显示已探索位置。
+        [HarmonyPatch(typeof(TeleportPylonsMapLayer), "IsRevealed")]
+        public static class PylonMapVisibilityPatch
+        {
+            public static void Postfix(ref bool __result)
+            {
+                if (Mod.Config != null &&
+                    (Mod.Config.UniversalPylons || Mod.Config.PylonPlacementUnrestricted ||
+                     Mod.Config.PylonTeleportWithoutNearbyPlayer || Mod.Config.PylonTeleportIgnoreBiome))
+                    __result = true;
+            }
+        }
+
+        // 原版地图图标和点击传送都读取 Pylons 属性；联机客户端不主动刷新此列表，
+        // 因此绘制地图前从本地已同步的晶塔实体重建列表，沿用原版图标命中与传送请求。
+        [HarmonyPatch(typeof(TeleportPylonsSystem), "get_Pylons")]
+        public static class ClientPylonMapListPatch
+        {
+            internal static void ReplaceClientPylons(List<TeleportPylonInfo> destination, IEnumerable<TeleportPylonInfo> localPylons)
+            {
+                destination.Clear();
+                destination.AddRange(localPylons);
+            }
+
+            public static void Postfix(ref List<TeleportPylonInfo> __result)
+            {
+                if (Main.netMode != 1 || __result == null) return;
+                var localPylons = new List<TeleportPylonInfo>();
+                foreach (TileEntity tileEntity in TileEntity.ByPosition.Values)
+                {
+                    var pylon = tileEntity as TETeleportationPylon;
+                    if (pylon == null || !pylon.TryGetPylonType(out TeleportPylonType type)) continue;
+                    localPylons.Add(new TeleportPylonInfo { PositionInTiles = pylon.Position, TypeOfPylon = type });
+                }
+                ReplaceClientPylons(__result, localPylons);
             }
         }
 

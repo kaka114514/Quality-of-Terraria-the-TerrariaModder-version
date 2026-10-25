@@ -39,7 +39,7 @@ namespace QualityOfTerraria.Patches
 
                 // 1. 无限药水
                 if (infinitePotions && item.type != ItemID.RedPotion && !IsPotionBlacklisted(config, item.type) &&
-                    item.buffType > 0 && !IsWellFedBuff(item.buffType) && !Main.debuff[item.buffType] && item.consumable)
+                    IsPotionCandidate(item) && item.buffType > 0 && !IsWellFedBuff(item.buffType) && !Main.debuff[item.buffType] && item.consumable)
                 {
                     int previous;
                     potionCounts.TryGetValue(item.type, out previous);
@@ -122,6 +122,13 @@ namespace QualityOfTerraria.Patches
         internal static bool IsPotionBlacklisted(int itemType)
         {
             return IsPotionBlacklisted(Mod.Config, itemType);
+        }
+
+        internal static bool IsPotionCandidate(Item item)
+        {
+            if (item == null || item.IsAir) return false;
+            return item.type == ItemID.Ale || item.type == ItemID.Sake ||
+                (item.buffType > 0 && item.buffType < Main.debuff.Length && !Main.debuff[item.buffType] && item.consumable);
         }
 
         private static bool IsWellFedBuff(int buffType)

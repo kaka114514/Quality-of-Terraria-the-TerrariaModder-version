@@ -198,20 +198,23 @@ namespace QualityOfTerraria
         public int ExtraGrabRange { get; set; } = 15;
 
         private float _toolSpeedMultiplier = 3f, _placementSpeedMultiplier = 2f;
-        internal static float NormalizeSpeed(float value)
+        internal static float NormalizeToolSpeed(float value)
             => float.IsNaN(value) || float.IsInfinity(value) ? 1f : (float)Math.Round((decimal)Math.Max(1f, Math.Min(4f, value)), 1, MidpointRounding.AwayFromZero);
+
+        internal static float NormalizePlacementSpeed(float value)
+            => float.IsNaN(value) || float.IsInfinity(value) ? 1f : (float)Math.Round((decimal)Math.Max(1f, Math.Min(2.5f, value)), 1, MidpointRounding.AwayFromZero);
 
         [Client]
         [Label("挖掘加速")]
         [Range(1, 4)]
         [Description("镐、斧、锤共用倍率，1.0至4.0倍，步长0.1；拖动滑条或点击右侧数值输入，回车确认。1.0为原版速度。")]
-        public float ToolSpeedMultiplier { get => _toolSpeedMultiplier; set => _toolSpeedMultiplier = NormalizeSpeed(value); }
+        public float ToolSpeedMultiplier { get => _toolSpeedMultiplier; set => _toolSpeedMultiplier = NormalizeToolSpeed(value); }
 
         [Client]
         [Label("放置加速")]
-        [Range(1, 4)]
-        [Description("方块和背景墙的放置倍率，1.0至4.0倍，步长0.1；拖动滑条或点击右侧数值输入，回车确认。")]
-        public float PlacementSpeedMultiplier { get => _placementSpeedMultiplier; set => _placementSpeedMultiplier = NormalizeSpeed(value); }
+        [Range(1, 2.5)]
+        [Description("方块和背景墙的放置倍率，1.0至2.5倍，步长0.1；拖动滑条或点击右侧数值输入，回车确认。")]
+        public float PlacementSpeedMultiplier { get => _placementSpeedMultiplier; set => _placementSpeedMultiplier = NormalizePlacementSpeed(value); }
 
         [Client]
         [Label("连锁挖矿")]
@@ -384,11 +387,6 @@ namespace QualityOfTerraria
         [Label("草药无环境限制")]
         [Description("草药不受原版时间、天气和环境条件限制而开花；成熟采摘始终掉落种子。")]
         public bool HerbIgnoreEnvironment { get; set; } = true;
-
-        [Server]
-        [Label("再生之斧自动补种")]
-        [Description("使用再生法杖或再生之斧收割成熟草药时自动补种种子。")]
-        public bool StaffOfRegrowthReplant { get; set; } = true;
 
         [Server]
         [Label("树木速生与无视深度")]
