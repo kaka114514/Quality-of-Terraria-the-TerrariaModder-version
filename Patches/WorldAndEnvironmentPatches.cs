@@ -73,6 +73,11 @@ namespace QualityOfTerraria.Patches
             public static void Postfix(ref List<TeleportPylonInfo> __result)
             {
                 if (Main.netMode != 1 || __result == null) return;
+                if (Networking.PylonSync.Ready)
+                {
+                    Networking.PylonSync.ReplaceClientPylons(__result, Networking.PylonSync.Pylons);
+                    return;
+                }
                 var localPylons = new List<TeleportPylonInfo>();
                 foreach (TileEntity tileEntity in TileEntity.ByPosition.Values)
                 {

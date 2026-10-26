@@ -19,6 +19,7 @@ namespace QualityOfTerraria
         private ModContext _context;
         private ILogger _logger;
         private bool _serverSession;
+        private bool _localSettingsSession;
         private bool _contentReady, _patchesApplied;
 #if !QOT_SERVER
         private IMod _serverRuntime;
@@ -42,6 +43,7 @@ namespace QualityOfTerraria
             _instance = this;
             _context = context;
             Config = context.GetConfig<QualityOfTerrariaConfig>();
+            VersionUpdateService.StartCheck();
             ConfigProfiles.Initialize();
             VeinMinerLegacyLoaded = context.IsModLoaded("vein-miner");
             LocalWorldSettings.Initialize();
@@ -131,12 +133,14 @@ namespace QualityOfTerraria
             WorldActive = true;
             Features.WorldControlSystem.OnWorldLoad();
             _serverSession = Main.netMode == 2;
-            if (Main.netMode == 0) LocalWorldSettings.Restore();
+            _localSettingsSession = Main.netMode == 0 || Netplay.IsHostAndPlay;
+            if (Main.netMode == 0 || Netplay.IsHostAndPlay) LocalWorldSettings.Restore();
             RemoteStorageOperations.Initialize();
             SettingsSync.Initialize();
             ToolNetwork.Initialize();
             FeatureNetwork.Initialize();
             VeinMiningNetwork.Initialize();
+            PylonSync.Initialize();
             Features.VeinMiningSystem.Suspended = VeinMinerLegacyLoaded;
             UI.RemoteStorageSnapshots.Initialize();
             if (!Main.dedServ)
@@ -171,6 +175,7 @@ namespace QualityOfTerraria
             ToolNetwork.Unload();
             FeatureNetwork.Unload();
             VeinMiningNetwork.Unload();
+            PylonSync.ResetSession();
             new HarmonyLib.Harmony(HarmonyId).UnpatchAll(HarmonyId);
             _contentReady = _patchesApplied = false;
             _context = null;
@@ -208,7 +213,13 @@ namespace QualityOfTerraria
         {
             if (!Main.dedServ) UI.SpeedSettingsUI.Reset();
             SaveSession();
+            if (WorldActive && _localSettingsSession)
+            {
+                string error;
+                if (!LocalWorldSettings.Save(out error)) _logger?.Error("保存服务器默认设置失败：" + error);
+            }
             WorldActive = false;
+            _localSettingsSession = false;
             if (!Main.dedServ) UI.UIManager.ResetSession();
             else
             {
@@ -219,6 +230,7 @@ namespace QualityOfTerraria
             if (_serverSession) StorageTransactionJournal.EndServerSession();
             _serverSession = false;
             RemoteStorageOperations.ResetSession();
+            PylonSync.ResetSession();
             SettingsSync.ResetSession();
             ToolNetwork.ResetSession();
             FeatureNetwork.ResetSession();
@@ -235,9 +247,11 @@ namespace QualityOfTerraria
         private void UpdateNetworkSession()
         {
             if (!WorldActive) return;
+            VersionUpdateService.Update();
             NetworkRuntime.Update();
             WandsAndTools.UpdatePlacementJobs();
             RemoteStorageOperations.Update();
+            PylonSync.Update();
             SettingsSync.Update();
             ToolNetwork.Update();
             FeatureNetwork.Update();

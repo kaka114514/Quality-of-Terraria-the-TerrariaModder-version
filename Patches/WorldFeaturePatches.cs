@@ -67,31 +67,39 @@ namespace QualityOfTerraria.Patches
             }
         }
 
-        internal static bool PylonInteractionRange(Player player, int x, int y, int width, int height, TileReachCheckSettings settings)
-        {
-            return (Main.netMode != 1 && Mod.Config != null && Mod.Config.PylonTeleportWithoutNearbyPlayer) ||
-                player.InTileEntityInteractionRange(x, y, width, height, settings);
-        }
+        [ThreadStatic] private static int _pylonTeleportRequestDepth;
+        internal static bool InPylonTeleportRequest => _pylonTeleportRequestDepth > 0;
 
         [HarmonyPatch(typeof(TeleportPylonsSystem), "HandleTeleportRequest")]
-        public static class PylonSourceRangePatch
+        public static class PylonTeleportRequestScopePatch
         {
-            public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+            public static void Prefix() { _pylonTeleportRequestDepth++; }
+            public static Exception Finalizer(Exception __exception)
             {
-                MethodInfo range = AccessTools.Method(typeof(Player), nameof(Player.InTileEntityInteractionRange),
+                _pylonTeleportRequestDepth = Math.Max(0, _pylonTeleportRequestDepth - 1);
+                return __exception;
+            }
+        }
+
+        [HarmonyPatch]
+        public static class PylonRangeOverridePatch
+        {
+            public static IEnumerable<MethodBase> TargetMethods()
+            {
+                MethodBase range = AccessTools.Method(typeof(Player), nameof(Player.InTileEntityInteractionRange),
                     new[] { typeof(int), typeof(int), typeof(int), typeof(int), typeof(TileReachCheckSettings) });
-                int count = 0;
-                foreach (CodeInstruction code in instructions)
+                if (range == null) throw new MissingMethodException("未找到玩家实体交互范围方法");
+                yield return range;
+            }
+
+            public static bool Prefix(ref bool __result)
+            {
+                if (InPylonTeleportRequest && Mod.Config != null && Mod.Config.PylonTeleportWithoutNearbyPlayer)
                 {
-                    if (code.Calls(range))
-                    {
-                        count++;
-                        code.opcode = OpCodes.Call;
-                        code.operand = AccessTools.Method(typeof(WorldFeaturePatches), nameof(PylonInteractionRange));
-                    }
-                    yield return code;
+                    __result = true;
+                    return false;
                 }
-                if (count != 1) throw new InvalidOperationException("未找到1.4.5.8晶塔源位置唯一范围判定。");
+                return true;
             }
         }
 

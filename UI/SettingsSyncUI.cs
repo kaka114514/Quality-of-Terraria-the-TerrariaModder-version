@@ -24,10 +24,14 @@ namespace QualityOfTerraria.UI
         };
         internal static readonly ConfigPropertyMeta[] CategoryMarkers = {
             new ConfigPropertyMeta(), new ConfigPropertyMeta(), new ConfigPropertyMeta(),
+            new ConfigPropertyMeta(), new ConfigPropertyMeta(), new ConfigPropertyMeta()
+        };
+        internal static readonly ConfigPropertyMeta[] AboutMarkers = {
+            new ConfigPropertyMeta(), new ConfigPropertyMeta(), new ConfigPropertyMeta(),
             new ConfigPropertyMeta(), new ConfigPropertyMeta()
         };
         private static readonly string[] CategoryNames = {
-            "物品与增益", "挖掘、建造与工具", "玩家便利与生存", "世界与环境", "NPC与图鉴"
+            "物品与增益", "挖掘、建造与工具", "玩家便利与生存", "世界与环境", "NPC与图鉴", "关于模组"
         };
         private static readonly IEnumerable<string>[] CategoryKeys = {
             new[] {
@@ -77,7 +81,8 @@ namespace QualityOfTerraria.UI
                 nameof(QualityOfTerrariaConfig.TownNPCConvenientMoveIn), nameof(QualityOfTerrariaConfig.TownNPCLiveInEvil),
                 nameof(QualityOfTerrariaConfig.TravellingMerchantStays), nameof(QualityOfTerrariaConfig.MaxNPCHappiness),
                 nameof(QualityOfTerrariaConfig.OneKillBestiary), nameof(QualityOfTerrariaConfig.StylistUnlockAllHair)
-            }
+            },
+            Array.Empty<string>()
         };
         private static readonly HashSet<int> ExpandedCategories = new HashSet<int>();
         private static readonly FieldInfo BlockInput = AccessTools.Field(typeof(ModMenu), "_blockInput");
@@ -164,6 +169,9 @@ namespace QualityOfTerraria.UI
                     if (key == nameof(QualityOfTerrariaConfig.RedPotionRequirement) && _enabled)
                         PotionBlacklistUI.AddRows(rows, propertyRow);
                 }
+                if (category == CategoryNames.Length - 1)
+                    foreach (ConfigPropertyMeta marker in AboutMarkers)
+                        rows.Add(ValueTuple.Create("property", (object)marker, source));
             }
         }
 
@@ -182,6 +190,8 @@ namespace QualityOfTerraria.UI
         {
             if (modId != ModId || !ReferenceEquals(config, Mod.Config)) return true;
             if (PotionBlacklistUI.IsMarker(metadata)) return PotionBlacklistUI.Draw(x, y, width, metadata, config);
+            int aboutRow = Array.IndexOf(AboutMarkers, metadata);
+            if (aboutRow >= 0) return DrawAboutRow(x, y, width, aboutRow);
             int category = Array.IndexOf(CategoryMarkers, metadata);
             if (category >= 0) return DrawCategory(x, y, width, category);
             int marker = Array.IndexOf(Markers, metadata);
@@ -348,6 +358,47 @@ namespace QualityOfTerraria.UI
             {
                 ToggleCategory(category);
                 UIRenderer.ConsumeClick();
+            }
+            return false;
+        }
+
+        private static bool DrawAboutRow(int x, int y, int width, int row)
+        {
+            bool hover = UIRenderer.MouseX >= x && UIRenderer.MouseX < x + width && UIRenderer.MouseY >= y && UIRenderer.MouseY < y + 28;
+            bool blocked = (bool)(BlockInput?.GetValue(null) ?? false);
+            if (hover && UIManager.CanRender) Main.LocalPlayer.mouseInterface = true;
+
+            string text;
+            switch (row)
+            {
+                case 0: text = "更好的体验（Quality of Terraria）"; break;
+                case 1: text = "作者：卡卡"; break;
+                case 2: text = "当前版本：v" + VersionUpdateService.CurrentVersion; break;
+                case 3:
+                    string latest = VersionUpdateService.LatestVersion;
+                    text = "最新版本：" + (latest == "查询失败" || latest == "尚未查询" ? latest
+                        : latest.StartsWith("v", StringComparison.OrdinalIgnoreCase) ? latest : "v" + latest);
+                    if (hover)
+                        TerrariaModder.Core.UI.Widgets.Tooltip.Set(latest == "查询失败" || latest == "尚未查询"
+                            ? "无法查询最新版本；下载入口位于视频评论区。"
+                            : VersionUpdateService.HasNewerVersion
+                                ? "当前版本较旧，到视频评论区下载最新版。"
+                                : "当前已是最新版本；下载入口位于视频评论区。");
+                    break;
+                default:
+                    text = "打开哔哩哔哩视频（评论区有下载链接）";
+                    if (hover) TerrariaModder.Core.UI.Widgets.Tooltip.Set("点击跳转至视频，评论区提供模组下载链接。");
+                    break;
+            }
+
+            if (row == 4)
+            {
+                if (Button(text, x, y, width, hover && !blocked)) VersionUpdateService.OpenVideo();
+            }
+            else
+            {
+                UIRenderer.DrawRect(x, y + 2, width, 24, (byte)(hover ? 42 : 24), 52, 78, 255);
+                PanelLayout.DrawFittedText(text, x + 7, y + 6, width - 14, 225, 235, 250);
             }
             return false;
         }

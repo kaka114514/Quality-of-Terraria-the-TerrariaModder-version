@@ -172,7 +172,7 @@ namespace QualityOfTerraria
                     string saveError;
                     if (!Networking.SettingsSync.SaveVerified(Mod.Config, out saveError)) throw new IOException(saveError);
                 }
-                if (Main.netMode == 0)
+                if (CanApplyServerSettings() && ConfigManager.GetCurrentScope() == ConfigScope.Client)
                 {
                     string worldError;
                     if (!Networking.LocalWorldSettings.Save(out worldError)) throw new IOException(worldError);
