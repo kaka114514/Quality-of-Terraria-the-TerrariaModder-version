@@ -187,6 +187,7 @@ namespace QualityOfTerraria.UI
                 ("spawn-rate-control", "[", "世界控制", "刷怪、时间、节日与特殊事件；房主或管理员提交"),
                 ("autofisher", "Z", "自动钓鱼机", "背包有鱼竿和鱼饵，在液体边开启"),
                 ("target-dummy", "X", "测试假人桩", "鼠标处生成/移除靶子并测DPS"),
+                ("item-generator", "T", "物品生成器", "" + (Mod.Config != null && Mod.Config.ItemGeneratorEnabled ? "已开启" : "已关闭") + "；开启设置后按 T 打开"),
                 ("weather-control", "U", "气象控制切换", "切换下雨和放晴"),
                 ("toggle-vein-mining", "V", "切换连锁挖矿", "相连矿石按范围和数量上限挖掘"),
                 ("toggle-speed-boost", "\\", "切换加速", "暂停或恢复挖掘、伐木、锤击与放置加速"),

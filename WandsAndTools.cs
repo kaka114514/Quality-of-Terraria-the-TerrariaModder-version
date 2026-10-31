@@ -19,8 +19,63 @@ namespace QualityOfTerraria
     public static class WandsAndTools
     {
         // ================= 1. 快速放置：手持物块/平台/墙拖拽框选铺设 =================
-        public static bool QuickPlaceActive = false;
-        public static bool SpaceWandDragActive { get => QuickPlaceActive; set => QuickPlaceActive = value; }
+        public enum QuickPlaceMode { Off, Place, Destroy, Copy, Paste }
+        private static QuickPlaceMode _quickPlaceMode;
+        private static bool _waitForQuickToolMouseRelease;
+        internal static bool DestroyDrops { get; set; } = true;
+        internal static bool DestroyBackgroundWalls { get; set; } = true;
+        public static QuickPlaceMode CurrentQuickPlaceMode => _quickPlaceMode;
+        public static bool QuickPlaceActive { get => _quickPlaceMode != QuickPlaceMode.Off; set => SetQuickPlaceMode(value ? QuickPlaceMode.Place : QuickPlaceMode.Off); }
+        public static bool SpaceWandDragActive { get => _quickPlaceMode == QuickPlaceMode.Place; set => SetQuickPlaceMode(value ? QuickPlaceMode.Place : QuickPlaceMode.Off); }
+
+        internal static bool CanQuickPlaceItem(Item held)
+            => held != null && !held.IsAir && (held.createTile >= 0 || held.createWall > 0);
+
+        private static bool QuickToolMouseButtonsDown()
+        {
+            MouseState mouse = Mouse.GetState();
+            return mouse.LeftButton == ButtonState.Pressed || mouse.RightButton == ButtonState.Pressed;
+        }
+
+        private static bool WaitingForQuickToolMouseRelease()
+        {
+            if (_waitForQuickToolMouseRelease && !QuickToolMouseButtonsDown()) _waitForQuickToolMouseRelease = false;
+            return _waitForQuickToolMouseRelease;
+        }
+
+        private static void SetQuickPlaceMode(QuickPlaceMode mode)
+        {
+            _quickPlaceMode = mode;
+            _isDragging = false;
+            _waitForQuickToolMouseRelease = QuickToolMouseButtonsDown();
+            Features.StructureClipboard.CancelPastePreview();
+            if (!Main.dedServ && Main.netMode != 2 && Main.LocalPlayer != null)
+                SuppressVanillaItemUse(Main.LocalPlayer);
+        }
+
+        internal static bool ShouldBlockVanillaItemUse(Player player)
+        {
+            if (Main.netMode == 2 || Main.dedServ || player == null || player != Main.LocalPlayer) return false;
+            if (!Mod.WorldActive || Main.gameMenu || !player.active || player.dead)
+            {
+                _waitForQuickToolMouseRelease = false;
+                return false;
+            }
+            bool waiting = WaitingForQuickToolMouseRelease();
+            if (!QuickPlaceActive && !waiting) return false;
+            if (Main.playerInventory || Main.mapFullscreen || Main.ingameOptionsWindow || Main.drawingPlayerChat || Main.editChest || Main.editSign) return false;
+            // 这里只限制玩家使用物品，模组窗口继续读取原始鼠标，不切换全局鼠标坐标。
+            return true;
+        }
+
+        internal static void SuppressVanillaItemUse(Player player)
+        {
+            player.controlUseItem = false;
+            player.controlUseTile = false;
+            player.channel = false;
+            player.itemAnimation = 0;
+            player.altFunctionUse = 0;
+        }
 
         private static bool _isDragging = false;
         private static int _dragStartX = -1;
@@ -37,27 +92,23 @@ namespace QualityOfTerraria
         public static void ExecuteQuickPlace()
         {
             if (!Mod.WorldActive || Main.gameMenu) return;
-            QuickPlaceActive = !QuickPlaceActive;
-            if (QuickPlaceActive)
-            {
-                SoundEngine.PlaySound(SoundID.MenuOpen);
-                Main.NewText("快速放置：已开启（左键拖拽铺设，右键取消）", 100, 255, 150);
-            }
-            else
-            {
-                SoundEngine.PlaySound(SoundID.MenuClose);
-                Main.NewText("快速放置: 已关闭。", 255, 150, 100);
-                _isDragging = false;
-            }
+            SetQuickPlaceMode((QuickPlaceMode)(((int)_quickPlaceMode + 1) % 5));
+            SoundEngine.PlaySound(_quickPlaceMode == QuickPlaceMode.Off ? SoundID.MenuClose : SoundID.MenuOpen);
+            Main.NewText("快速工具：" + GetQuickPlaceModeName(_quickPlaceMode) + "（Ctrl+P打开配置页）", 100, 255, 150);
         }
+
+        internal static string GetQuickPlaceModeName(QuickPlaceMode mode)
+            => mode == QuickPlaceMode.Place ? "快速放置" : mode == QuickPlaceMode.Destroy ? "破坏" : mode == QuickPlaceMode.Copy ? "复制" : mode == QuickPlaceMode.Paste ? "粘贴" : "关闭";
 
         public static void ExecuteSpaceWand() => ExecuteQuickPlace();
 
         public static void UpdateQuickPlace()
         {
             _hasHoverTile = false;
+            bool waitingForRelease = WaitingForQuickToolMouseRelease();
             if (!QuickPlaceActive)
             {
+                Features.StructureClipboard.CancelPastePreview();
                 _isDragging = false;
                 return;
             }
@@ -68,15 +119,67 @@ namespace QualityOfTerraria
             {
                 if (Main.mapFullscreen && QuickPlaceActive)
                 {
-                    QuickPlaceActive = false;
+                    SetQuickPlaceMode(QuickPlaceMode.Off);
                     Main.NewText("快速放置：打开地图后已自动关闭。", 255, 180, 100);
                 }
                 _isDragging = false;
                 return;
             }
 
+            if (waitingForRelease)
+            {
+                _isDragging = false;
+                return;
+            }
+
             if (IsMouseOverToolUI() && !_isDragging)
             {
+                return;
+            }
+
+            if (_quickPlaceMode == QuickPlaceMode.Paste)
+            {
+                player.mouseInterface = true;
+                player.controlUseItem = false;
+                if (Main.mouseRight)
+                {
+                    Features.StructureClipboard.CancelPastePreview();
+                    return;
+                }
+                Vector2 cursorWorld = GetWorldPointFromScreen(new Vector2(PlayerInput.MouseX, PlayerInput.MouseY),
+                    Main.screenPosition, Main.GameViewMatrix.TransformationMatrix);
+                int cursorX = (int)Math.Floor(cursorWorld.X / 16f);
+                int cursorY = (int)Math.Floor(cursorWorld.Y / 16f);
+                int pasteX = Features.StructureClipboard.GetPasteAnchorX(cursorX);
+                int pasteY = Features.StructureClipboard.GetPasteAnchorY(cursorY);
+                bool hadPastePreview = Features.StructureClipboard.IsPastePreview;
+                if (!hadPastePreview)
+                    Features.StructureClipboard.BeginPasteAt(pasteX, pasteY);
+                else
+                    Features.StructureClipboard.UpdatePreview(pasteX, pasteY);
+                if (hadPastePreview && (UIRenderer.MouseLeftClick || (Main.mouseLeft && Main.mouseLeftRelease)))
+                {
+                    if (Main.netMode == 1)
+                    {
+                        if (ToolNetwork.RequestStructurePaste(Features.StructureClipboard.PreviewX, Features.StructureClipboard.PreviewY,
+                            UI.StructureClipboardUI.ConsumeMaterials, UI.StructureClipboardUI.DestroyTerrain))
+                        {
+                            Features.StructureClipboard.CancelPastePreview();
+                            Main.NewText("结构粘贴：正在等待服务器确认", 200, 220, 255);
+                        }
+                        return;
+                    }
+                    int placed;
+                    if (!Features.StructureClipboard.PasteAt(player, Features.StructureClipboard.PreviewX, Features.StructureClipboard.PreviewY, UI.StructureClipboardUI.ConsumeMaterials, UI.StructureClipboardUI.DestroyTerrain, out placed)) Main.NewText("结构粘贴：材料不足或放置失败", 255, 180, 100);
+                    else Main.NewText("结构粘贴：已放置 " + placed + " 格", 120, 255, 150);
+                }
+                return;
+            }
+
+            // 模式激活时原版物品使用已被拦截；放置模式仍只接受可放置物品。
+            if (_quickPlaceMode == QuickPlaceMode.Place && !CanQuickPlaceItem(player.HeldItem))
+            {
+                _isDragging = false;
                 return;
             }
 
@@ -114,13 +217,61 @@ namespace QualityOfTerraria
             else if (_isDragging)
             {
                 // 鼠标左键松开，批量执行铺设
-                ExecuteDragPlacement(player, _dragStartX, _dragStartY, _dragCurX, _dragCurY);
+                ExecuteModeSelection(player, _dragStartX, _dragStartY, _dragCurX, _dragCurY);
                 _isDragging = false;
             }
         }
 
         public static void UpdateSpaceWand() => UpdateQuickPlace();
+        private static void ExecuteModeSelection(Player player, int x1, int y1, int x2, int y2)
+        {
+            if (_quickPlaceMode == QuickPlaceMode.Place) ExecuteDragPlacement(player, x1, y1, x2, y2);
+            else if (_quickPlaceMode == QuickPlaceMode.Destroy) ExecuteDestroySelection(player, x1, y1, x2, y2);
+            else if (_quickPlaceMode == QuickPlaceMode.Copy) Features.StructureClipboard.CaptureSelection(x1, y1, x2, y2);
+        }
 
+        private static void ExecuteDestroySelection(Player player, int x1, int y1, int x2, int y2)
+        {
+            if (Main.netMode == 1) { ToolNetwork.Request("destroy", -1, x1, y1, x2, y2); return; }
+            DestroyDrops = Mod.Config == null || Mod.Config.DestroyDrops;
+            DestroyBackgroundWalls = Mod.Config == null || Mod.Config.DestroyBackgroundWalls;
+            int destroyed = 0, skipped = 0, minX = Math.Max(10, Math.Min(x1, x2)), maxX = Math.Min(Main.maxTilesX - 10, Math.Max(x1, x2));
+            int minY = Math.Max(10, Math.Min(y1, y2)), maxY = Math.Min(Main.maxTilesY - 10, Math.Max(y1, y2));
+            DestroyTiles(player, minX, minY, maxX, maxY, out destroyed, out skipped);
+            SyncTileArea(minX, minY, maxX, maxY);
+            Main.NewText($"快速破坏：已破坏 {destroyed} 格，跳过 {skipped} 格", 100, 255, 150);
+        }
+
+        internal static void DestroyTiles(Player player, int minX, int minY, int maxX, int maxY, out int destroyed, out int skipped)
+        {
+            destroyed = skipped = 0;
+            int pickPower = BestPickPower(player);
+            int hammerPower = BestHammerPower(player);
+            for (int x = minX; x <= maxX; x++) for (int y = minY; y <= maxY; y++)
+            {
+                Tile tile = Main.tile[x, y];
+                if (tile == null || (!tile.active() && tile.wall == 0)) continue;
+                bool changed = false;
+                if (tile.active())
+                {
+                    bool canDestroyTile = pickPower > 0 && WorldGen.CanKillTile(x, y) && VeinMiningSystem.CanMineTile(player, x, y, pickPower);
+                    if (canDestroyTile) { WorldGen.KillTile(x, y, false, false, !DestroyDrops); changed = !tile.active(); }
+                    else skipped++;
+                }
+                if (DestroyBackgroundWalls && tile.wall != 0)
+                {
+                    if (hammerPower > 0) { WorldGen.KillWall(x, y, !DestroyDrops); changed = tile.wall == 0 || changed; }
+                    else skipped++;
+                }
+                if (changed) destroyed++;
+            }
+        }
+        private static int BestHammerPower(Player player)
+        {
+            int best = 0;
+            foreach (Item item in player.inventory) if (item != null && !item.IsAir && item.hammer > best) best = item.hammer;
+            return best;
+        }
         private static bool IsMouseOverToolUI()
         {
             // Player.Update 后仍处于世界鼠标坐标阶段；只在 UI 命中判断期间切换。
@@ -154,7 +305,7 @@ namespace QualityOfTerraria
                 PlacementTiles(x1, y1, x2, y2) > SynchronousPlacementLimit)
             {
                 var config = SettingsSync.GetPlayerConfig(player.whoAmI);
-                _localJob = CreatePlacementJob(player, player.selectedItem, held.createTile < 0, x1, y1, x2, y2, config != null && config.WandMaterialNoConsume);
+                _localJob = CreatePlacementJob(player, player.selectedItem, held.createTile < 0, x1, y1, x2, y2, config != null && config.WandMaterialNoConsume, config != null && config.QuickPlaceDestroyTerrain);
                 UpdatePlacementJobs();
                 return;
             }
@@ -170,7 +321,7 @@ namespace QualityOfTerraria
         {
             internal Player Player;
             internal int PlayerSlot, Slot, Type, Style, Prefix, Placed;
-            internal bool Wall, NoConsume, Done;
+            internal bool Wall, NoConsume, DestroyTerrain, Done;
             internal int MinX, MinY, MaxX, MaxY, ChunkX, ChunkY;
             internal int SyncX1 = int.MaxValue, SyncY1 = int.MaxValue, SyncX2 = int.MinValue, SyncY2 = int.MinValue;
         }
@@ -182,14 +333,14 @@ namespace QualityOfTerraria
             return (Math.Abs(x2 - x1) + 1) * (Math.Abs(y2 - y1) + 1);
         }
 
-        internal static PlacementJob CreatePlacementJob(Player player, int slot, bool wall, int x1, int y1, int x2, int y2, bool noConsume)
+        internal static PlacementJob CreatePlacementJob(Player player, int slot, bool wall, int x1, int y1, int x2, int y2, bool noConsume, bool destroyTerrain)
         {
             Item held = slot >= 0 && slot < player.inventory.Length ? player.inventory[slot] : null;
             int minX = Math.Max(10, Math.Min(x1, x2)), maxX = Math.Min(Main.maxTilesX - 10, Math.Max(x1, x2));
             int minY = Math.Max(10, Math.Min(y1, y2)), maxY = Math.Min(Main.maxTilesY - 10, Math.Max(y1, y2));
             return new PlacementJob
             {
-                Player = player, PlayerSlot = player.whoAmI, Slot = slot, Wall = wall, NoConsume = noConsume,
+                Player = player, PlayerSlot = player.whoAmI, Slot = slot, Wall = wall, NoConsume = noConsume, DestroyTerrain = destroyTerrain,
                 Type = held == null ? 0 : held.type, Style = held == null ? 0 : held.placeStyle, Prefix = held == null ? 0 : held.prefix,
                 MinX = minX, MaxX = maxX, MinY = minY, MaxY = maxY, ChunkX = minX, ChunkY = minY
             };
@@ -232,7 +383,7 @@ namespace QualityOfTerraria
                         {
                             bool planting = PlantingItems.Contains(held.type);
                             if (IsSameTilePlacement(tile, held)) continue;
-                            if (tile.active() && (planting || !TryReplaceTile(player, x, y, pickPower))) continue;
+                            if (tile.active() && (!job.DestroyTerrain || planting || !TryReplaceTile(player, x, y, pickPower))) continue;
                             PlaceTileSilently(player, held, x, y);
                             placed = tile.active();
                         }
@@ -278,7 +429,7 @@ namespace QualityOfTerraria
             Tile tile = Main.tile[x, y];
             if (tile == null || !tile.active()) return true;
             if (pickPower <= 0 || !WorldGen.CanKillTile(x, y) || !VeinMiningSystem.CanMineTile(player, x, y, pickPower)) return false;
-            WorldGen.KillTile(x, y, false, false, false);
+            WorldGen.KillTile(x, y, false, false, !DestroyDrops);
             return !tile.active();
         }
 
@@ -353,6 +504,7 @@ namespace QualityOfTerraria
 
             int placed = 0;
             bool noConsume = config != null && config.WandMaterialNoConsume;
+            bool destroyTerrain = config != null && config.QuickPlaceDestroyTerrain;
             int pickPower = isTile ? BestPickPower(player) : 0;
 
             for (int x = minX; x <= maxX; x++)
@@ -371,7 +523,7 @@ namespace QualityOfTerraria
                         // 空格直接放置；已有方块时按原版规则替换：背包里有能挖掉它的镐子即可。
                         bool planting = PlantingItems.Contains(held.type);
                         if (IsSameTilePlacement(tile, held)) continue;
-                        if (planting ? !tile.active() : (!tile.active() || TryReplaceTile(player, x, y, pickPower)))
+                        if (planting ? !tile.active() : (!tile.active() || (destroyTerrain && TryReplaceTile(player, x, y, pickPower))))
                         {
                             PlaceTileSilently(player, held, x, y);
                             if (tile.active())
@@ -430,8 +582,8 @@ namespace QualityOfTerraria
             Vector2 worldTopLeft = new Vector2(minTileX * 16f, minTileY * 16f);
             Vector2 worldBottomRight = new Vector2((maxTileX + 1) * 16f, (maxTileY + 1) * 16f);
 
-            Vector2 screenTopLeft = Vector2.Transform(worldTopLeft - Main.screenPosition, Main.GameViewMatrix.ZoomMatrix);
-            Vector2 screenBottomRight = Vector2.Transform(worldBottomRight - Main.screenPosition, Main.GameViewMatrix.ZoomMatrix);
+            Vector2 screenTopLeft = Vector2.Transform(worldTopLeft - Main.screenPosition, Main.GameViewMatrix.TransformationMatrix);
+            Vector2 screenBottomRight = Vector2.Transform(worldBottomRight - Main.screenPosition, Main.GameViewMatrix.TransformationMatrix);
 
             float uiScale = Main.UIScale;
             if (uiScale <= 0.01f) uiScale = 1f;
@@ -443,6 +595,9 @@ namespace QualityOfTerraria
 
             return new Rectangle(x, y, Math.Max(1, w), Math.Max(1, h));
         }
+
+        internal static Vector2 GetWorldPointFromScreen(Vector2 screen, Vector2 screenPosition, Matrix worldTransform)
+            => Vector2.Transform(screen, Matrix.Invert(worldTransform)) + screenPosition;
 
         // ================= 2. 液体魔杖：模式切换、吸收与生成 =================
         public enum LiquidWandMode
@@ -617,7 +772,9 @@ namespace QualityOfTerraria
 
         public static void ResetSession()
         {
-            QuickPlaceActive = false;
+            _quickPlaceMode = QuickPlaceMode.Off;
+            _waitForQuickToolMouseRelease = false;
+            Features.StructureClipboard.CancelPastePreview();
             CurrentLiquidMode = LiquidWandMode.Off;
             _localJob = null;
             _isDragging = _isDraggingQuickPlaceHud = _isDraggingLiquidHud = false;
@@ -794,6 +951,10 @@ namespace QualityOfTerraria
             PanelLayout.ClampToScreen(ref LiquidHudX, ref LiquidHudY, LiquidHudW, LiquidHudH);
             int mouseX = UIRenderer.MouseX;
             int mouseY = UIRenderer.MouseY;
+            if (Features.StructureClipboard.IsPastePreview)
+            {
+                Features.StructureClipboard.DrawPreview();
+            }
 
             // 快速放置提示与拖拽框 (支持拖动)
             if (QuickPlaceActive)
@@ -832,7 +993,7 @@ namespace QualityOfTerraria
 
                 UIRenderer.DrawPanel(QuickPlaceHudX, QuickPlaceHudY, QuickPlaceHudW, QuickPlaceHudH, 20, 30, 20, 220);
                 UIRenderer.DrawRectOutline(QuickPlaceHudX, QuickPlaceHudY, QuickPlaceHudW, QuickPlaceHudH, 100, 255, 150, 255, 1);
-                PanelLayout.DrawFittedText($"快速放置: [{heldName}] (左键框选)", QuickPlaceHudX + 10, QuickPlaceHudY + 8, QuickPlaceHudW - 20, 100, 255, 150);
+                PanelLayout.DrawFittedText($"{GetQuickPlaceModeName(_quickPlaceMode)}: [{heldName}] (左键框选)", QuickPlaceHudX + 10, QuickPlaceHudY + 8, QuickPlaceHudW - 20, 100, 255, 150);
 
                 if (_isDragging)
                 {
@@ -923,4 +1084,3 @@ namespace QualityOfTerraria
         }
     }
 }
-

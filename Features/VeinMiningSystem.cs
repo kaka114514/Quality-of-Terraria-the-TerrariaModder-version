@@ -68,10 +68,16 @@ namespace QualityOfTerraria.Features
             return type == 63 || type == 64 || type == 65 || type == 66 || type == 67 || type == 68 || type == 178;
         }
 
-        internal static bool CanMine(Player player, int x, int y, QualityOfTerrariaConfig config)
-            => config != null && CanMine(player, x, y, config.VeinMiningCheckPickaxePower);
+        internal static bool IsExtractinatorBlock(ushort type)
+            => type == TileID.Silt || type == TileID.Slush || type == TileID.DesertFossil;
 
-        internal static bool CanMineOrigin(Player player, int x, int y) => CanMine(player, x, y, true);
+        internal static bool IsChainable(ushort type, QualityOfTerrariaConfig config)
+            => IsOre(type) || (config != null && config.VeinMiningExtractinatorBlocks && IsExtractinatorBlock(type));
+
+        internal static bool CanMine(Player player, int x, int y, QualityOfTerrariaConfig config)
+            => config != null && CanMine(player, x, y, config, config.VeinMiningCheckPickaxePower);
+
+        internal static bool CanMineOrigin(Player player, int x, int y) => player != null && CanMine(player, x, y, SettingsSync.GetPlayerConfig(player.whoAmI), true);
 
         // 建造工具复用同一套原版镐力判定：该镐力能否破坏这块瓦片。
         internal static bool CanMineTile(Player player, int x, int y, int pickPower)
@@ -80,19 +86,19 @@ namespace QualityOfTerraria.Features
             return player != null && pickPower > 0 && tile != null && tile.active() && GetDamage(player, x, y, pickPower, 0, tile) > 0;
         }
 
-        private static bool CanMine(Player player, int x, int y, bool checkPower)
+        private static bool CanMine(Player player, int x, int y, QualityOfTerrariaConfig config, bool checkPower)
         {
             if (player == null || !player.active || player.dead || !WorldGen.InWorld(x, y, 1)) return false;
             Tile tile = Main.tile[x, y];
             Item tool = player.HeldItem;
-            if (tile == null || !tile.active() || !IsOre(tile.type) || tool == null || tool.pick <= 0 || !WorldGen.CanKillTile(x, y)) return false;
+            if (tile == null || !tile.active() || !IsChainable(tile.type, config) || tool == null || tool.pick <= 0 || !WorldGen.CanKillTile(x, y)) return false;
             return !checkPower || GetDamage(player, x, y, tool.pick, 0, tile) > 0;
         }
 
         internal static bool Start(Player player, int x, int y, ushort oreType, QualityOfTerrariaConfig config)
         {
             // 调用者已经核验原版成功破矿与个人开关/强制键；客户端绝不执行地形修改。
-            if (Suspended || Main.netMode == 1 || !Mod.WorldActive || Main.gameMenu || player == null || !player.active || player.dead || config == null || !IsOre(oreType) || !WorldGen.InWorld(x, y, 1)) return false;
+            if (Suspended || Main.netMode == 1 || !Mod.WorldActive || Main.gameMenu || player == null || !player.active || player.dead || config == null || !IsChainable(oreType, config) || !WorldGen.InWorld(x, y, 1)) return false;
             if (player.whoAmI < 0 || player.whoAmI >= Main.player.Length || Main.player[player.whoAmI] != player || player.HeldItem == null || player.HeldItem.pick <= 0) return false;
             foreach (Job active in Jobs) if (active.Player == player) return false;
             Mod.LogInfo($"[连锁挖矿系统] 启动任务: player.whoAmI={player.whoAmI}, 坐标=({x},{y}), 矿石={oreType}");
@@ -100,7 +106,7 @@ namespace QualityOfTerraria.Features
             {
                 Player = player, World = Main.tile, X = x, Y = y, Type = oreType,
                 Range = Math.Max(1, Math.Min(30, config.VeinMiningRange)), Limit = Math.Max(1, Math.Min(500, config.VeinMiningMaxBlocks)),
-                Exact = config.VeinMiningMatchExactType, CheckPower = config.VeinMiningCheckPickaxePower,
+                Exact = config.VeinMiningMatchExactType || IsExtractinatorBlock(oreType), CheckPower = config.VeinMiningCheckPickaxePower,
                 AutoLoot = config.VeinMiningAutoLoot, ShowMessages = config.VeinMiningShowMessages
             };
             job.Visited.Add(new Point(x, y));
@@ -140,7 +146,7 @@ namespace QualityOfTerraria.Features
                         budget--;
                         Point point = job.Pending.Dequeue();
                         Tile tile = Main.tile[point.X, point.Y];
-                        if (tile == null || !tile.active() || !IsOre(tile.type) || (job.Exact && tile.type != job.Type) || !WorldGen.CanKillTile(point.X, point.Y)) continue;
+                        if (tile == null || !tile.active() || (job.Exact ? tile.type != job.Type : !IsOre(tile.type)) || !WorldGen.CanKillTile(point.X, point.Y)) continue;
                         if (job.CheckPower && GetDamage(player, point.X, point.Y, player.HeldItem.pick, 0, tile) <= 0) continue;
                         DropContext previous = _drops;
                         _drops = new DropContext { Player = player, X = point.X, Y = point.Y, Job = job, AutoLoot = job.AutoLoot };

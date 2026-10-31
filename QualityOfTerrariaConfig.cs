@@ -222,6 +222,11 @@ namespace QualityOfTerraria
         public bool VeinMiningEnabled { get; set; } = true;
 
         [Client]
+        [Label("提炼物可连锁")]
+        [Description("允许泥沙块、雪泥块、沙漠化石参与连锁开采，只连锁同类；需开启连锁挖矿或按住强制连锁键。沿用范围、数量上限和自动入包设置，不会自动提炼。")]
+        public bool VeinMiningExtractinatorBlocks { get; set; } = false;
+
+        [Client]
         [Label("矿石自动入包")]
         [Description("开采的矿石按原版拾取规则收进背包，背包满时保留地面掉落。")]
         public bool VeinMiningAutoLoot { get; set; } = true;
@@ -477,8 +482,43 @@ namespace QualityOfTerraria
 
         // ================= 快捷工具与魔杖 =================
         [Client]
-        [Label("建筑魔杖不消耗材料")]
-        [Description("快速放置时不消耗背包材料。")]
+        [Label("破坏掉落物品")]
+        [Description("快速破坏时生成方块或墙的掉落物；关闭后不产生掉落。默认开启。")]
+        public bool DestroyDrops { get; set; } = true;
+
+        [Client]
+        [Label("破坏模式破坏背景墙")]
+        [Description("破坏模式是否允许使用背包内的锤子破坏背景墙。默认开启。")]
+        public bool DestroyBackgroundWalls { get; set; } = true;
+
+        [Client]
+        [Label("粘贴消耗材料")]
+        [Description("结构粘贴时是否消耗背包中的方块材料。默认开启。")]
+        public bool PasteConsumeMaterials { get; set; } = true;
+
+        [Client]
+        [Label("粘贴破坏地形")]
+        [Description("结构粘贴时是否先破坏目标位置的方块。默认关闭。")]
+        public bool PasteDestroyTerrain { get; set; } = false;
+
+        [Client]
+        [Label("快速放置破坏地形")]
+        [Description("快速放置替换已有方块时是否允许先破坏目标地形。默认关闭。")]
+        public bool QuickPlaceDestroyTerrain { get; set; } = false;
+
+        [Client]
+        [Label("快速放置不消耗材料")]
+        [Description("快速放置时不消耗背包材料。") ]
         public bool WandMaterialNoConsume { get; set; } = false;
+
+        [Client]
+        [Label("平台穿透无停顿")]
+        [Description("按住下方向键时可直接穿过平台，不改变普通方块碰撞。默认开启。")]
+        public bool PlatformFallthroughEnabled { get; set; } = true;
+
+        [Client]
+        [Label("启用物品生成器快捷键")]
+        [Description("开启后可按 T 打开物品生成器；默认关闭。")]
+        public bool ItemGeneratorEnabled { get; set; } = false;
     }
 }

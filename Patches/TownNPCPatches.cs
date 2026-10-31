@@ -301,13 +301,13 @@ namespace QualityOfTerraria.Patches
             }
         }
 
-        // 9. 快速放置激活时，彻底拦截原版手持物块/工具的单格自动放置与挥舞
+        // 9. 快速工具独占世界使用输入，保留原版界面交互。
         [HarmonyPatch(typeof(Player), nameof(Player.TryingToUseItem))]
         public static class QuickPlaceBlockVanillaUsePatch
         {
             public static bool Prefix(Player __instance, ref bool __result)
             {
-                if (Mod.WorldActive && !Main.gameMenu && WandsAndTools.QuickPlaceActive && __instance != null && __instance.whoAmI == Main.myPlayer && !Main.playerInventory)
+                if (WandsAndTools.ShouldBlockVanillaItemUse(__instance))
                 {
                     __result = false;
                     return false;

@@ -14,16 +14,24 @@ namespace QualityOfTerraria.UI
     public enum StorageTab
     {
         All,
-        Weapons,
-        Armor,
-        Accessories,
         Tools,
-        Ammo,
-        Blocks,
-        Alchemy,
-        Furniture,
+        Weapons,
+        Accessories,
+        Materials,
+        Consumables,
+        Armor,
         ChestManager,
-        Settings
+        Settings,
+        Vanity,
+        BuildingBlocks,
+        FurnitureItems,
+        Equipment,
+        Other,
+        // 保留旧名称，避免已有网络请求和存档读取失败。
+        Ammo = Consumables,
+        Blocks = Materials,
+        Alchemy = Consumables,
+        Furniture = Materials
     }
 
     public enum ItemSortMode
@@ -53,6 +61,7 @@ namespace QualityOfTerraria.UI
         private static bool _storageActionHeld;
         private static int _storageActionNeutralFrames;
         private static ulong _storageActionCooldownUntil;
+        private static bool _forceUnlockArmed;
         private const ulong StorageActionCooldownFrames = 5;
 
         public static StorageTab CurrentTab = StorageTab.All;
@@ -99,10 +108,10 @@ namespace QualityOfTerraria.UI
             PanelHeight = Math.Min(580, PanelLayout.ScreenHeight);
             _compactLayout = PanelHeight < 420;
             int width = PanelWidth - 32;
-            _categoryColumns = Math.Max(1, Math.Min(9, (width + 4) / 56));
+            _categoryColumns = 6;
             _categoryWidth = (width - (_categoryColumns - 1) * 4) / _categoryColumns;
             _categoryHeight = _compactLayout ? 22 : 26;
-            int categoryRows = (9 + _categoryColumns - 1) / _categoryColumns;
+            int categoryRows = (ItemCategory.Names.Length + _categoryColumns - 1) / _categoryColumns;
             _searchY = 42 + categoryRows * (_categoryHeight + 4) + 6;
             _contentY = _searchY + (IsItemTab ? (_compactLayout ? 24 : 28) + 4 : 0);
             _footerY = PanelHeight - (IsItemTab ? (_compactLayout ? 60 : 70) : 16);
@@ -125,6 +134,7 @@ namespace QualityOfTerraria.UI
             _storageActionHeld = false;
             _storageActionNeutralFrames = 0;
             _storageActionCooldownUntil = 0;
+            _forceUnlockArmed = false;
             _search.Unfocus();
             _search.Clear();
             SearchText = "";
@@ -507,57 +517,10 @@ namespace QualityOfTerraria.UI
             return result;
         }
 
-        private static int GetItemKind(Item item)
-        {
-            if (MatchesTab(item, StorageTab.Accessories)) return 2;
-            if (MatchesTab(item, StorageTab.Armor)) return 1;
-            if (MatchesTab(item, StorageTab.Tools)) return 3;
-            if (MatchesTab(item, StorageTab.Ammo)) return 4;
-            if (MatchesTab(item, StorageTab.Weapons)) return 0;
-            if (MatchesTab(item, StorageTab.Alchemy)) return 6;
-            if (MatchesTab(item, StorageTab.Furniture)) return 7;
-            if (MatchesTab(item, StorageTab.Blocks)) return 5;
-            return 8;
-        }
+        private static int GetItemKind(Item item) => ItemCategory.GetSortOrder(item);
 
         private static bool MatchesTab(Item item, StorageTab tab)
-        {
-            if (item == null || item.IsAir) return false;
-
-            switch (tab)
-            {
-                case StorageTab.All:
-                    return true;
-                case StorageTab.Weapons:
-                    // 纯武器：有伤害且不是饰品、不是挖掘/伐木/锤/钓鱼工具
-                    return item.damage > 0 && item.ammo == 0 && !item.accessory && item.pick == 0 && item.axe == 0 && item.hammer == 0 && item.fishingPole == 0;
-                case StorageTab.Armor:
-                    // 防具与时装 (非饰品)
-                    return (item.headSlot >= 0 || item.bodySlot >= 0 || item.legSlot >= 0 || item.vanity) && !item.accessory;
-                case StorageTab.Accessories:
-                    // 饰品
-                    return item.accessory;
-                case StorageTab.Tools:
-                    // 工具：镐、斧、锤、钓竿、电线油漆工具、魔镜等
-                    return item.pick > 0 || item.axe > 0 || item.hammer > 0 || item.fishingPole > 0 || item.type == ItemID.WireCutter || item.type == ItemID.Wrench || item.type == ItemID.Paintbrush || item.type == ItemID.MagicMirror || item.type == ItemID.CellPhone;
-                case StorageTab.Ammo:
-                    return item.ammo > 0;
-                case StorageTab.Blocks:
-                    // 纯建筑方块与墙体 (排除家具)
-                    return (item.createTile >= 0 || item.createWall > 0) && item.consumable && !IsFurniture(item);
-                case StorageTab.Alchemy:
-                    // 药水、增益、恢复、草药、种子
-                    return item.buffType > 0 || item.healLife > 0 || item.healMana > 0 || item.bait > 0 ||
-                           (item.createTile == TileID.ImmatureHerbs || item.createTile == TileID.MatureHerbs || item.createTile == TileID.BloomingHerbs);
-                case StorageTab.Furniture:
-                    return IsFurniture(item);
-                case StorageTab.ChestManager:
-                case StorageTab.Settings:
-                    return false;
-                default:
-                    return true;
-            }
-        }
+            => ItemCategory.Matches(item, Array.IndexOf(ItemCategory.Tabs, tab));
 
         private static bool IsFurniture(Item item)
         {
@@ -586,8 +549,7 @@ namespace QualityOfTerraria.UI
 
             if (Patches.StorageInventoryGuard.Locked)
             {
-                UIRenderer.DrawPanel(PanelX, PanelY, PanelWidth, 64, 18, 22, 36, 240);
-                PanelLayout.DrawFittedText("物品操作等待确认：" + RemoteStorageOperations.Status, PanelX + 12, PanelY + 24, PanelWidth - 24, 255, 220, 120);
+                DrawLockedStoragePanel();
                 return;
             }
 
@@ -661,11 +623,11 @@ namespace QualityOfTerraria.UI
             }
 
             // 4. Tab 分类栏
-            string[] tabNames = { "全部", "武器", "防具", "饰品", "工具", "弹药", "建筑", "药水", "家具" };
+            string[] tabNames = ItemCategory.Names;
 
             for (int i = 0; i < tabNames.Length; i++)
             {
-                StorageTab tab = (StorageTab)i;
+                StorageTab tab = ItemCategory.Tabs[i];
                 int tabX = PanelX + 16 + (i % _categoryColumns) * (_categoryWidth + 4);
                 int tabY = PanelY + 42 + (i / _categoryColumns) * (_categoryHeight + 4);
                 if (DrawButton(tabNames[i], tabX, tabY, _categoryWidth, _categoryHeight, CurrentTab == tab))
@@ -1108,6 +1070,38 @@ namespace QualityOfTerraria.UI
             if (!hover || !enabled || !UIRenderer.MouseLeftClick) return false;
             UIRenderer.ConsumeClick();
             return true;
+        }
+
+        private static void DrawLockedStoragePanel()
+        {
+            const int height = 116;
+            bool storageLocked = RemoteStorageOperations.Busy;
+            bool canForceUnlock = RemoteStorageOperations.CanForceUnlock;
+            UIRenderer.DrawPanel(PanelX, PanelY, PanelWidth, height, 18, 22, 36, 240);
+            string status = storageLocked ? RemoteStorageOperations.Status : "其他工具请求正在等待服务器确认";
+            PanelLayout.DrawFittedText("物品操作等待确认：" + status, PanelX + 12, PanelY + 10, PanelWidth - 24, 255, 220, 120);
+            int width = (PanelWidth - 36) / 2;
+            int y = PanelY + 62;
+            if (DrawButton("重试核验", PanelX + 12, y, width, 28, false, storageLocked))
+            {
+                _forceUnlockArmed = false;
+                RemoteStorageOperations.RetryPendingOperation();
+                Main.NewText("【终极存储】" + RemoteStorageOperations.Status, 150, 230, 255);
+            }
+            string forceText = _forceUnlockArmed ? "再次点击确认" : "强制解锁";
+            if (DrawButton(forceText, PanelX + 24 + width, y, width, 28, false, canForceUnlock))
+            {
+                if (!_forceUnlockArmed)
+                {
+                    _forceUnlockArmed = true;
+                    Main.NewText("【终极存储】强制解锁会放弃等待服务器结果，请再次点击确认。", 255, 190, 120);
+                }
+                else
+                {
+                    _forceUnlockArmed = false;
+                    RemoteStorageOperations.ForceUnlock();
+                }
+            }
         }
 
         private static void DrawBottomToolbar(int startX, int startY)

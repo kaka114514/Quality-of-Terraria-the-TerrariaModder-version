@@ -126,7 +126,7 @@ namespace QualityOfTerraria.Networking
             }
             if (action == "liquid" && _liquidFrame != 0 && Main.GameUpdateCount - _liquidFrame < 10) return;
             // 服务器签发世界会话后继续本次操作，旧请求不能在重连后执行。
-            if (_nonce == null)
+            if (_nonce == null && action != "hello")
             {
                 if (_singlePlayerLiquids == null) _singlePlayerLiquids = GetLiquids();
                 string requestedAction = action; int requestedSlot = slot; int[] requestedValues = (int[])values.Clone();
@@ -169,6 +169,40 @@ namespace QualityOfTerraria.Networking
             if (action != "liquid") Main.NewText("正在等待服务器工具操作确认", 200, 220, 255);
         }
 
+        internal static bool RequestStructurePaste(int x, int y, bool consumeMaterials, bool destroyTerrain)
+        {
+            if (Main.netMode != 1 || !Mod.WorldActive || Busy || RemoteStorageOperations.Busy) return false;
+            if (!NetSync.LocalPlayerHasModAccess("quality-of-terraria"))
+            {
+                Main.NewText("服务器未授予本模组工具权限", 255, 120, 120); return false;
+            }
+            string structure = Features.StructureClipboard.SerializeSelected();
+            if (string.IsNullOrEmpty(structure))
+            {
+                Main.NewText("结构粘贴：结构数据过大或尚未选择结构", 255, 180, 100); return false;
+            }
+            if (_nonce == null)
+            {
+                int savedX = x, savedY = y; bool savedConsume = consumeMaterials, savedDestroy = destroyTerrain;
+                _afterHello = () => RequestStructurePaste(savedX, savedY, savedConsume, savedDestroy);
+                Request("hello");
+                return true;
+            }
+            _pending = Guid.NewGuid().ToString("N");
+            _action = "paste-structure"; _slot = -1; _sent = Main.GameUpdateCount;
+            using (var stream = new MemoryStream())
+            using (var writer = new BinaryWriter(stream))
+            {
+                writer.Write(_pending); writer.Write(_nonce); writer.Write(++_sequence);
+                writer.Write(_action); writer.Write(-1); writer.Write(0); writer.Write(0); writer.Write((byte)0);
+                writer.Write(4); writer.Write(x); writer.Write(y); writer.Write(consumeMaterials ? 1 : 0); writer.Write(destroyTerrain ? 1 : 0);
+                writer.Write(structure);
+                _payload = Convert.ToBase64String(stream.ToArray());
+            }
+            NetSyncPayload.SendRequest(Operation, _payload);
+            return true;
+        }
+
         private static bool SamePeer(int client, Peer peer)
         {
             return client >= 0 && client < Main.maxPlayers && Main.player[client] != null && Main.player[client].active &&
@@ -196,7 +230,8 @@ namespace QualityOfTerraria.Networking
             bool ok = false, remember = false, noConsume = false;
             try
             {
-                if (payload == null || payload.Length > 1024) throw new InvalidDataException(message);
+                // 结构粘贴包含压缩后的结构数据，NetSyncPayload 已负责分片；这里校验完整载荷而不是单片长度。
+                if (payload == null || payload.Length > 60000) throw new InvalidDataException(message);
                 using (var reader = new BinaryReader(new MemoryStream(Convert.FromBase64String(payload))))
                 {
                     token = reader.ReadString(); string nonce = reader.ReadString(); long sequence = reader.ReadInt64();
@@ -205,6 +240,7 @@ namespace QualityOfTerraria.Networking
                     int count = reader.ReadInt32();
                     if (token.Length != 32 || nonce.Length > 32 || sequence <= 0 || count < 0 || count > 5) throw new InvalidDataException(message);
                     var values = new int[count]; for (int i = 0; i < count; i++) values[i] = reader.ReadInt32();
+                    string structurePayload = action == "paste-structure" ? reader.ReadString() : null;
                     if (reader.BaseStream.Position != reader.BaseStream.Length) throw new InvalidDataException(message);
                     if (!PermissionService.HasModAccess(client, "quality-of-terraria")) throw new InvalidDataException("服务器未授予本模组工具权限");
                     if (string.IsNullOrEmpty(PermissionService.GetGuid(client))) throw new InvalidDataException("玩家身份尚未确认");
@@ -254,7 +290,7 @@ namespace QualityOfTerraria.Networking
                             if (WandsAndTools.PlacementTiles(values[0], values[1], values[2], values[3]) > WandsAndTools.SynchronousPlacementLimit)
                             {
                                 // 大范围铺设分帧执行：先记住请求，完成后按同一序号返回结果，客户端重发不会重复铺设。
-                                peer.Job = WandsAndTools.CreatePlacementJob(player, slot, material.createTile < 0, values[0], values[1], values[2], values[3], noConsume);
+                                peer.Job = WandsAndTools.CreatePlacementJob(player, slot, material.createTile < 0, values[0], values[1], values[2], values[3], noConsume, config.QuickPlaceDestroyTerrain);
                                 peer.JobSlot = slot;
                                 peer.JobSequence = sequence;
                                 peer.JobNoConsume = noConsume;
@@ -264,6 +300,43 @@ namespace QualityOfTerraria.Networking
                                 return;
                             }
                             message = "快速放置：服务器已铺设 " + WandsAndTools.ApplyDragPlacement(player, values[0], values[1], values[2], values[3]) + " 格";
+                        }
+                        else if (action == "destroy")
+                        {
+                            var destroyConfig = SettingsSync.GetPlayerConfig(client);
+                            WandsAndTools.DestroyDrops = destroyConfig == null || destroyConfig.DestroyDrops;
+                            WandsAndTools.DestroyBackgroundWalls = destroyConfig == null || destroyConfig.DestroyBackgroundWalls;
+                            if (count != 4) throw new InvalidDataException("破坏选区请求无效");
+                            CheckArea(values);
+                            int destroyed, skipped;
+                            WandsAndTools.DestroyTiles(player, Math.Max(10, Math.Min(values[0], values[2])), Math.Max(10, Math.Min(values[1], values[3])), Math.Min(Main.maxTilesX - 10, Math.Max(values[0], values[2])), Math.Min(Main.maxTilesY - 10, Math.Max(values[1], values[3])), out destroyed, out skipped);
+                            WandsAndTools.SyncTileArea(Math.Max(10, Math.Min(values[0], values[2])), Math.Max(10, Math.Min(values[1], values[3])), Math.Min(Main.maxTilesX - 10, Math.Max(values[0], values[2])), Math.Min(Main.maxTilesY - 10, Math.Max(values[1], values[3])));
+                            message = $"快速破坏：服务器已破坏 {destroyed} 格，跳过 {skipped} 格";
+                        }
+                        else if (action == "give-item")
+                        {
+                            if (count != 2 || !ValidateGiveItemRequest(client, values[0], values[1]))
+                                throw new InvalidDataException("物品生成请求无效或没有房主/管理员权限");
+                            Item[] beforeInventory = SnapshotInventory(player);
+                            var generated = new Item();
+                            generated.SetDefaults(values[0]);
+                            generated.stack = values[1];
+                            Item remaining = player.GetItem(generated, GetItemSettings.PickupItemFromWorld);
+                            int added = values[1] - (remaining == null || remaining.IsAir ? 0 : remaining.stack);
+                            SyncChangedInventory(client, beforeInventory, player.inventory);
+                            message = added == values[1] ? "物品生成器：已生成 " + generated.Name + " ×" + added : "物品生成器：已加入 " + added + " 件，背包空间不足";
+                        }
+                        else if (action == "paste-structure")
+                        {
+                            if (count != 4 || structurePayload == null || structurePayload.Length > 44000 || values[2] < 0 || values[2] > 1 || values[3] < 0 || values[3] > 1)
+                                throw new InvalidDataException("结构粘贴请求无效");
+                            Item[] beforeInventory = SnapshotInventory(player);
+                            int placed, structureWidth, structureHeight;
+                            if (!Features.StructureClipboard.PasteSerialized(player, structurePayload, values[0], values[1], values[2] != 0, values[3] != 0, out placed, out structureWidth, out structureHeight))
+                                throw new InvalidDataException("结构材料不足或放置失败");
+                            WandsAndTools.SyncTileArea(values[0], values[1], values[0] + structureWidth - 1, values[1] + structureHeight - 1);
+                            if (values[2] != 0) SyncChangedInventory(client, beforeInventory, player.inventory);
+                            message = "结构粘贴：服务器已放置 " + placed + " 格";
                         }
                         else if (action == "liquid")
                         {
@@ -409,6 +482,36 @@ namespace QualityOfTerraria.Networking
                 area[1] < 10 || area[1] >= Main.maxTilesY - 10 || area[3] < 10 || area[3] >= Main.maxTilesY - 10 ||
                 ((long)Math.Abs(area[2] - area[0]) + 1) * (Math.Abs(area[3] - area[1]) + 1) > 4096)
                 throw new InvalidDataException("框选超出世界或4096格单次上限，请缩小范围");
+        }
+
+        internal static bool ValidateGiveItemRequest(int client, int itemType, int quantity)
+            => PermissionService.IsAdmin(client) && itemType > 0 && itemType < ItemID.Count && quantity >= 1 && quantity <= 9999;
+
+        internal static Item[] SnapshotInventory(Player player)
+        {
+            var snapshot = new Item[59];
+            for (int slot = 0; slot < snapshot.Length; slot++) snapshot[slot] = player.inventory[slot]?.Clone() ?? new Item();
+            return snapshot;
+        }
+
+        internal static List<int> GetChangedInventorySlots(Item[] before, Item[] after)
+        {
+            var changed = new List<int>();
+            if (before == null || after == null) return changed;
+            int count = Math.Min(59, Math.Min(before.Length, after.Length));
+            for (int slot = 0; slot < count; slot++)
+            {
+                Item a = before[slot], b = after[slot];
+                bool emptyA = a == null || a.IsAir, emptyB = b == null || b.IsAir;
+                if (emptyA != emptyB || (!emptyA && (a.type != b.type || a.stack != b.stack || a.prefix != b.prefix || a.favorited != b.favorited))) changed.Add(slot);
+            }
+            return changed;
+        }
+
+        internal static void SyncChangedInventory(int player, Item[] before, Item[] after)
+        {
+            foreach (int slot in GetChangedInventorySlots(before, after))
+                NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, player, slot);
         }
 
         private static string BuildResponse(string token, Peer peer, int slot, Player player, bool ok, string message, bool noConsume)

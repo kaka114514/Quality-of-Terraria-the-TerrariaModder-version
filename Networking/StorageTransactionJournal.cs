@@ -103,27 +103,29 @@ namespace QualityOfTerraria.Networking
                 if (cursor.CharacterHash != currentHash)
                 {
                     VerifyCurrentCharacter(Main.ActivePlayerFileData, currentHash);
-                    // 原版会保存鼠标物品。只在没有待处理交易且当前库存与原版存档一致时，
-                    // 接受当前存档；保留旧记录，不把旧鼠标物品再次恢复出来。
-                    string archive = cursorPath + ".stale-" + Guid.NewGuid().ToString("N");
-                    File.Copy(cursorPath, archive);
-                    if (File.Exists(cursorPath + ".bak")) File.Copy(cursorPath + ".bak", archive + ".bak");
-                    if (File.Exists(_path)) File.Copy(_path, archive + ".journal");
-                    File.WriteAllBytes(archive + ".plr", FileUtilities.ReadAllBytes(Main.ActivePlayerFileData.Path, Main.ActivePlayerFileData.IsCloudSave));
-                    Status = "角色存档已更新并通过核验；保留当前物品，过期鼠标记录已备份";
+                    string archive = ArchiveCursorEvidence(cursorPath);
+                    Status = "角色背包已核验；过期鼠标记录已备份，保留当前鼠标物品";
                     Mod.LogInfo(Status + "：" + archive);
                     return;
                 }
                 Item mouse = Main.mouseItem;
-                if (mouse != null && !mouse.IsAir && (mouse.type != cursor.Type || mouse.stack != cursor.Stack || mouse.prefix != cursor.Prefix))
-                    throw new InvalidDataException("当前鼠标物品与已保存记录不一致");
+                bool mouseEmpty = mouse == null || mouse.IsAir;
+                if (mouseEmpty != (cursor.Type == 0) || (!mouseEmpty &&
+                    (mouse.type != cursor.Type || mouse.stack != cursor.Stack || mouse.prefix != cursor.Prefix || mouse.favorited != cursor.Favorite)))
+                {
+                    VerifyCurrentCharacter(Main.ActivePlayerFileData, currentHash);
+                    string archive = ArchiveCursorEvidence(cursorPath);
+                    Status = "角色背包已核验；鼠标物品记录不一致，已备份旧记录并保留当前物品";
+                    Mod.LogInfo(Status + "：" + archive);
+                    return;
+                }
                 var restored = new Item();
                 if (cursor.Type > 0) { restored.SetDefaults(cursor.Type); restored.Prefix(cursor.Prefix); restored.stack = cursor.Stack; restored.favorited = cursor.Favorite; }
                 Main.mouseItem = restored;
                 Main.LocalPlayer.inventory[58] = restored;
                 Status = "";
             }
-            catch (Exception error) { _canSave = false; Status = "角色存档与鼠标记录未能核验；保留记录并锁定库存"; Mod.LogError(Status, error); }
+            catch (Exception error) { _canSave = false; Status = "角色存档与鼠标记录未能核验；保留记录并锁定库存：" + error.Message; Mod.LogError(Status, error); }
         }
 
         private static void Validate(ClientRecord record)
@@ -157,6 +159,38 @@ namespace QualityOfTerraria.Networking
             catch (Exception error) { Status = "写入事务日志失败，未发送物品操作"; Mod.LogError(Status, error); return false; }
         }
 
+        internal static bool ForceUnlockClient()
+        {
+            if (Main.netMode == 2 || string.IsNullOrEmpty(_path))
+            {
+                Status = "当前环境不能手动解除库存锁";
+                return false;
+            }
+            try
+            {
+                string suffix = ".forced-" + DateTime.UtcNow.ToString("yyyyMMddHHmmssfff");
+                foreach (string source in new[] { _path, _path + ".bak", _path + ".cursor", _path + ".cursor.bak" })
+                    if (File.Exists(source)) File.Copy(source, source + suffix, true);
+
+                StoragePersistence.WriteInPlace(_path, writer => { writer.Write(2); writer.Write(false); });
+                foreach (string cursor in new[] { _path + ".cursor", _path + ".cursor.bak" })
+                    if (File.Exists(cursor)) File.Delete(cursor);
+                Pending = null;
+                _canSave = true;
+                _lastSaveTick = 0;
+                _opsSinceSave = 0;
+                Status = "已备份并手动解除库存锁；旧操作结果未确认，请检查物品数量";
+                Mod.LogInfo(Status + "：" + suffix);
+                return true;
+            }
+            catch (Exception error)
+            {
+                Status = "手动解除库存锁失败；原记录仍保留";
+                Mod.LogError(Status, error);
+                return false;
+            }
+        }
+
         private static string CharacterHash(PlayerFileData file)
         {
             if (file == null || string.IsNullOrEmpty(file.Path) || file.ServerSideCharacter || Main.ServerSideCharacter)
@@ -176,10 +210,19 @@ namespace QualityOfTerraria.Networking
             for (int i = 0; i < 58; i++)
                 if (!SameSavedItem(file.Player.inventory[i], saved.inventory[i]))
                     throw new InvalidDataException("当前背包与原版存档不一致，不能自动接纳过期鼠标记录");
-            var slots = (Item[])AccessTools.Field(typeof(Player), "_temporaryItemSlots").GetValue(saved);
-            if (slots == null || slots.Length == 0 || !SameSavedItem(Main.mouseItem, slots[0]))
-                throw new InvalidDataException("当前鼠标物品与原版存档不一致，不能自动接纳过期鼠标记录");
             if (CharacterHash(file) != expectedHash) throw new InvalidDataException("角色存档在核验期间发生变化");
+        }
+
+        private static string ArchiveCursorEvidence(string cursorPath)
+        {
+            string archive = cursorPath + ".stale-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            File.Copy(cursorPath, archive);
+            if (File.Exists(cursorPath + ".bak")) File.Copy(cursorPath + ".bak", archive + ".bak");
+            if (File.Exists(_path)) File.Copy(_path, archive + ".journal");
+            File.WriteAllBytes(archive + ".plr", FileUtilities.ReadAllBytes(Main.ActivePlayerFileData.Path, Main.ActivePlayerFileData.IsCloudSave));
+            File.Delete(cursorPath);
+            if (File.Exists(cursorPath + ".bak")) File.Delete(cursorPath + ".bak");
+            return archive;
         }
 
         private static bool SameSavedItem(Item actual, Item saved)

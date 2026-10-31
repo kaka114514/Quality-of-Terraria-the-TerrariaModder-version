@@ -25,7 +25,7 @@ namespace QualityOfTerraria.Patches
             if (Main.netMode == 2 || !Mod.WorldActive || VeinMiningSystem.Suspended || __instance != Main.LocalPlayer || !WorldGen.InWorld(x, y, 1)) return;
             QualityOfTerrariaConfig config = SettingsSync.GetPlayerConfig(__instance.whoAmI);
             Tile tile = Main.tile[x, y];
-            if (config == null || tile == null || !tile.active() || !VeinMiningSystem.IsOre(tile.type) || __instance.HeldItem == null || __instance.HeldItem.pick <= 0) return;
+            if (config == null || tile == null || !tile.active() || !VeinMiningSystem.IsChainable(tile.type, config) || __instance.HeldItem == null || __instance.HeldItem.pick <= 0) return;
             __state = new PickState { Type = tile.type, Forced = Mod.IsForceVeinMiningHeld(), Config = config, Drops = VeinMiningSystem.BeginDrops(__instance, x, y) };
         }
 

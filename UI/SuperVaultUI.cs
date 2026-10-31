@@ -1,4 +1,5 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
 using System.IO;
 using Microsoft.Xna.Framework;
 using Terraria;
@@ -22,6 +23,8 @@ namespace QualityOfTerraria.UI
         private static bool _isDragging = false;
         private static int _dragOffsetX = 0;
         private static int _dragOffsetY = 0;
+        private static bool _forceUnlockArmed;
+        private static int _category;
 
         public static Item[] VaultItems = new Item[100];
         private static string _loadedPlayerName = null;
@@ -40,6 +43,8 @@ namespace QualityOfTerraria.UI
         {
             IsOpen = false;
             _isDragging = false;
+            _forceUnlockArmed = false;
+            _category = 0;
             _loadedPlayerName = null;
             _loadedPath = null;
             _canSave = false;
@@ -109,8 +114,7 @@ namespace QualityOfTerraria.UI
 
             if (Patches.StorageInventoryGuard.Locked)
             {
-                UIRenderer.DrawPanel(PanelX, PanelY, PanelWidth, 64, 18, 22, 36, 240);
-                PanelLayout.DrawFittedText("物品操作等待确认：" + Networking.RemoteStorageOperations.Status, PanelX + 12, PanelY + 24, PanelWidth - 24, 255, 220, 120);
+                DrawLockedStoragePanel();
                 return;
             }
 
@@ -166,18 +170,49 @@ namespace QualityOfTerraria.UI
                 return;
             }
 
+            int categoryY = PanelY + 40;
+            const int categoryColumns = 6;
+            int categoryRows = (ItemCategory.Names.Length + categoryColumns - 1) / categoryColumns;
+            int categoryWidth = Math.Max(1, (PanelWidth - 24 - (categoryColumns - 1) * 4) / categoryColumns);
+            for (int category = 0; category < ItemCategory.Names.Length; category++)
+            {
+                int x = PanelX + 12 + (category % categoryColumns) * (categoryWidth + 4);
+                int y = categoryY + (category / categoryColumns) * 28;
+                bool hover = mouseX >= x && mouseX < x + categoryWidth && mouseY >= y && mouseY < y + 26;
+                if (hover) Main.LocalPlayer.mouseInterface = true;
+                UIRenderer.DrawRect(x, y, categoryWidth, 24, (byte)(category == _category ? 65 : hover ? 50 : 30), 65, 95, 230);
+                PanelLayout.DrawFittedText(ItemCategory.Names[category], x + 4, y + 5, categoryWidth - 8, 235, 240, 250);
+                if (hover && UIRenderer.MouseLeftClick)
+                {
+                    _category = category;
+                    UIRenderer.ConsumeClick();
+                }
+            }
+
             // 3. 10x10 网格绘制 (水平居中: 23px边距, 垂直间距紧凑自然)
             if (!_canSave)
             {
-                PanelLayout.DrawFittedText("存档无法恢复：暂停存取以保护原文件，请查看模组日志。", PanelX + 16, PanelY + 56, PanelWidth - 32, 255, 180, 100);
+                PanelLayout.DrawFittedText("存档无法恢复：暂停存取以保护原文件，请查看模组日志。", PanelX + 16, categoryY + categoryRows * 28 + 4, PanelWidth - 32, 255, 180, 100);
                 return;
             }
             int startX = PanelX + 16;
-            int startY = PanelY + 48;
+            int startY = categoryY + categoryRows * 28 + 4;
             int cols = 10;
             int rows = 10;
             int spacing = 4;
-            int slotSize = Math.Max(8, Math.Min(46, Math.Min((PanelWidth - 32) / 10 - spacing, (PanelHeight - 104) / 10 - spacing)));
+            int availableHeight = PanelHeight - (startY - PanelY) - 60;
+            int slotSize = Math.Max(8, Math.Min((PanelWidth - 32 - spacing * 9) / 10, (availableHeight - spacing * 9) / 10));
+            var visibleSlots = new List<int>(VaultItems.Length);
+            for (int i = 0; i < VaultItems.Length; i++)
+            {
+                Item item = VaultItems[i];
+                if (item != null && !item.IsAir && ItemCategory.Matches(item, _category)) visibleSlots.Add(i);
+            }
+            for (int i = 0; i < VaultItems.Length; i++)
+            {
+                Item item = VaultItems[i];
+                if (item == null || item.IsAir) visibleSlots.Add(i);
+            }
 
             Item hoveredItem = null;
 
@@ -185,7 +220,8 @@ namespace QualityOfTerraria.UI
             {
                 for (int c = 0; c < cols; c++)
                 {
-                    int index = r * cols + c;
+                    int visibleIndex = r * cols + c;
+                    int index = visibleIndex < visibleSlots.Count ? visibleSlots[visibleIndex] : -1;
                     int x = startX + c * (slotSize + spacing);
                     int y = startY + r * (slotSize + spacing);
 
@@ -198,7 +234,7 @@ namespace QualityOfTerraria.UI
                     UIRenderer.DrawRect(x, y, slotSize, slotSize, (byte)(hover ? 38 : 22), (byte)(hover ? 52 : 30), (byte)(hover ? 80 : 48), 255);
                     UIRenderer.DrawRectOutline(x, y, slotSize, slotSize, (byte)(hover ? 100 : 50), (byte)(hover ? 180 : 90), (byte)(hover ? 255 : 130), 255, 1);
 
-                    Item item = VaultItems[index];
+                    Item item = index >= 0 ? VaultItems[index] : null;
                     if (item != null && !item.IsAir)
                     {
                         StorageItemDrawing.DrawIcon(item, x + 3, y + 3, slotSize - 6, slotSize - 6);
@@ -217,9 +253,20 @@ namespace QualityOfTerraria.UI
 
                     if (hover && UIRenderer.MouseLeftClick)
                     {
+                        if (index < 0)
+                        {
+                            UIRenderer.ConsumeClick();
+                            continue;
+                        }
                         // 场景 1: 手持一组物品点击槽位
                         if (Main.mouseItem != null && !Main.mouseItem.IsAir)
                         {
+                            if (!ItemCategory.Matches(Main.mouseItem, _category))
+                            {
+                                Main.NewText("当前分类不接受此物品。", 255, 190, 120);
+                                UIRenderer.ConsumeClick();
+                                continue;
+                            }
                             if (item == null || item.IsAir)
                             {
                                 // 直接整组放入空槽
@@ -334,7 +381,7 @@ namespace QualityOfTerraria.UI
             }
         }
 
-        private static void DrawButton(int x, int y, int w, int h, string text, Action onClick)
+        private static void DrawButton(int x, int y, int w, int h, string text, Action onClick, bool enabled = true)
         {
             int mouseX = UIRenderer.MouseX;
             int mouseY = UIRenderer.MouseY;
@@ -344,19 +391,51 @@ namespace QualityOfTerraria.UI
                 Main.player[Main.myPlayer].mouseInterface = true;
             }
 
-            byte r = hover ? (byte)45 : (byte)28;
-            byte g = hover ? (byte)85 : (byte)46;
-            byte b = hover ? (byte)150 : (byte)80;
+            byte r = hover && enabled ? (byte)45 : (byte)28;
+            byte g = hover && enabled ? (byte)85 : (byte)46;
+            byte b = hover && enabled ? (byte)150 : (byte)80;
 
             UIRenderer.DrawRect(x, y, w, h, r, g, b, 255);
             UIRenderer.DrawRectOutline(x, y, w, h, (byte)(hover ? 120 : 60), (byte)(hover ? 200 : 100), 255, 255, 1);
             PanelLayout.DrawFittedText(text, x + 10, y + 8, w - 20, 240, 240, 240);
 
-            if (hover && UIRenderer.MouseLeftClick)
+            if (hover && enabled && UIRenderer.MouseLeftClick)
             {
                 onClick?.Invoke();
                 UIRenderer.ConsumeClick();
             }
+        }
+
+        private static void DrawLockedStoragePanel()
+        {
+            const int height = 116;
+            bool storageLocked = Networking.RemoteStorageOperations.Busy;
+            bool canForceUnlock = Networking.RemoteStorageOperations.CanForceUnlock;
+            UIRenderer.DrawPanel(PanelX, PanelY, PanelWidth, height, 18, 22, 36, 240);
+            string status = storageLocked ? Networking.RemoteStorageOperations.Status : "其他工具请求正在等待服务器确认";
+            PanelLayout.DrawFittedText("物品操作等待确认：" + status, PanelX + 12, PanelY + 10, PanelWidth - 24, 255, 220, 120);
+            if (!storageLocked) return;
+            int width = (PanelWidth - 36) / 2;
+            int y = PanelY + 62;
+            DrawButton(PanelX + 12, y, width, 28, "重试核验", () =>
+            {
+                _forceUnlockArmed = false;
+                Networking.RemoteStorageOperations.RetryPendingOperation();
+                Main.NewText("【终极存储】" + Networking.RemoteStorageOperations.Status, 150, 230, 255);
+            });
+            DrawButton(PanelX + 24 + width, y, width, 28, _forceUnlockArmed ? "再次点击确认" : "强制解锁", () =>
+            {
+                if (!_forceUnlockArmed)
+                {
+                    _forceUnlockArmed = true;
+                    Main.NewText("【终极存储】强制解锁会放弃等待服务器结果，请再次点击确认。", 255, 190, 120);
+                }
+                else
+                {
+                    _forceUnlockArmed = false;
+                    Networking.RemoteStorageOperations.ForceUnlock();
+                }
+            }, canForceUnlock);
         }
 
         public static bool DepositItem(Item item)

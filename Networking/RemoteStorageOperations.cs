@@ -84,6 +84,8 @@ namespace QualityOfTerraria.Networking
         private static ulong _lastBusyWarning; // 上次显示"请等待"提示的时间
 
         internal static bool Busy => _pending != null || StorageTransactionJournal.ClientLocked;
+        // 强制解锁是最后手段：即使请求仍在等待返回，也允许用户放弃本次等待。
+        internal static bool CanForceUnlock => Main.netMode == 1 && StorageTransactionJournal.ClientLocked;
         internal static bool Ready => !string.IsNullOrEmpty(_token);
         internal static string WorldIdentity => Main.netMode == 2 ? ServerMarkedChests.WorldIdentity : _world;
         internal static string Status { get; private set; } = "等待服务器确认标记箱子";
@@ -383,6 +385,56 @@ namespace QualityOfTerraria.Networking
             return slot >= 0 && slot < 58 && Request(7, -1, slot, item);
         }
 
+        internal static bool RetryPendingOperation()
+        {
+            if (Main.netMode != 1 || !Ready)
+            {
+                Status = "服务器连接尚未准备好，暂时不能重试核验";
+                return false;
+            }
+            if (_pending != null)
+            {
+                _lastSend = Main.GameUpdateCount;
+                Status = "正在重新请求服务器确认物品操作";
+                NetSyncPayload.SendRequest(Prefix + "move", _pending);
+                return true;
+            }
+            var recovery = StorageTransactionJournal.Pending;
+            if (recovery != null && !recovery.Confirmed)
+            {
+                if (recovery.World != _world)
+                {
+                    Status = "请返回原服务器和原世界后再恢复这次操作";
+                    return false;
+                }
+                _recoveryPending = Encode(writer => { writer.Write(_token); writer.Write(recovery.Id); });
+                _lastRecovery = Main.GameUpdateCount;
+                Status = "正在重新查询服务器上的旧物品操作";
+                NetSyncPayload.SendRequest(Prefix + "recover", _recoveryPending);
+                return true;
+            }
+            Status = "没有可重试的远程存储操作";
+            return false;
+        }
+
+        internal static bool ForceUnlock()
+        {
+            if (Main.netMode != 1 || !StorageTransactionJournal.ClientLocked)
+            {
+                Status = "当前没有可解除的库存锁";
+                return false;
+            }
+            if (!StorageTransactionJournal.ForceUnlockClient()) return false;
+            _pending = null;
+            _before = null;
+            _recoveryPending = null;
+            _recoveredInventory = false;
+            _openPending = null;
+            Status = StorageTransactionJournal.Status;
+            Main.NewText("【终极存储】" + Status, 255, 190, 120);
+            return true;
+        }
+
         private static bool Request(int action, int chest, int slot, Item expected)
         {
             Player player = Main.LocalPlayer;
@@ -504,7 +556,7 @@ namespace QualityOfTerraria.Networking
             State expected = State.Read(reader);
             int tab = reader.ReadInt32(), sort = reader.ReadInt32();
             string search = reader.ReadString();
-            if (action < 0 || action > 7 || tab < 0 || tab > (int)StorageTab.Furniture || sort < 0 || sort > (int)ItemSortMode.Kind || search.Length > 96)
+            if (action < 0 || action > 7 || Array.IndexOf(ItemCategory.Tabs, (StorageTab)tab) < 0 || sort < 0 || sort > (int)ItemSortMode.Kind || search.Length > 96)
                 throw new InvalidDataException("存取参数不合法");
             var before = new State[59];
             for (int i = 0; i < before.Length; i++) before[i] = State.Read(reader);
@@ -514,6 +566,7 @@ namespace QualityOfTerraria.Networking
             bool valid = !player.dead && player.inventory.Length >= 59;
             for (int i = 0; valid && i < 59; i++) valid = before[i].Matches(player.inventory[i]);
             var readable = ServerMarkedChests.GetReadable(client).ToList();
+            int unavailableMarkedChests = Math.Max(0, (ServerMarkedChests.GetKeys(client)?.Count ?? 0) - readable.Count);
             // 单格取物只会读取一个来源箱子。之前每次点击都克隆所有标记箱，
             // 箱子较多时服务器主线程会在一次响应中分配数万件 Item，造成联机卡顿。
             List<Chest> chests = readable;
@@ -523,7 +576,11 @@ namespace QualityOfTerraria.Networking
             { valid = false; message = "箱子已变化、锁定或被占用，未转移物品"; }
             else if ((action == 2 || action == 7) && (slot < 0 || slot > 58 || !expected.Matches(player.inventory[slot])))
             { valid = false; message = "待存入物品已变化，未转移物品"; }
-            else if (chests.Count == 0) { valid = false; message = "没有可操作的标记箱子"; }
+            else if (chests.Count == 0)
+            {
+                valid = false;
+                message = action == 3 ? FormatBulkDepositMessage(0, unavailableMarkedChests) : "没有可操作的标记箱子";
+            }
             if (valid && (action == 0 || action == 1))
             {
                 Chest sourceChest = Main.chest[chestIndex];
@@ -564,7 +621,9 @@ namespace QualityOfTerraria.Networking
                                 moved += StorageTransfers.Move(item, new[] { inventory });
                 }
                 Array.Copy(inventory, stagedInventory, 50);
-                message = action == 5 ? "[终极存储]：标记箱子已整理" : moved > 0 ? $"已转移 {moved} 件物品" : "没有可转移的物品或目标存储空间已满";
+                message = action == 5 ? "[终极存储]：标记箱子已整理"
+                    : action == 3 ? FormatBulkDepositMessage(moved, unavailableMarkedChests)
+                    : moved > 0 ? $"已转移 {moved} 件物品" : "没有可转移的物品或目标存储空间已满";
                 for (int c = 0; c < chests.Count; c++)
                     for (int s = 0; s < chests[c].item.Length; s++)
                         if (!new State(boxes[c][s]).Matches(chests[c].item[s]))
@@ -602,6 +661,12 @@ namespace QualityOfTerraria.Networking
 
         private static Item[] CloneSlots(Item[] slots)
             => slots.Select(item => item == null ? new Item() : item.IsAir ? item : item.Clone()).ToArray();
+
+        internal static string FormatBulkDepositMessage(int moved, int unavailableChests)
+        {
+            string result = moved > 0 ? $"已转移 {moved} 件物品" : "没有可转移的物品或目标存储空间已满";
+            return unavailableChests > 0 ? result + $"；{unavailableChests} 个标记箱当前不可用，已跳过" : result;
+        }
 
         private static void HandleResponse(bool success, string operation, string payload)
         {

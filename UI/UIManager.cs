@@ -19,9 +19,11 @@ namespace QualityOfTerraria.UI
             RegisterDraw(QuickStorageUI.PanelId, QuickStorageUI.Draw);
             RegisterDraw(ExtremeStorageUI.PanelId, ExtremeStorageUI.Draw);
             RegisterDraw(SuperVaultUI.PanelId, SuperVaultUI.Draw);
+            RegisterDraw(ItemGeneratorUI.PanelId, ItemGeneratorUI.Draw);
             RegisterDraw(PlayerStatsUI.PanelId, PlayerStatsUI.Draw);
             RegisterDraw(BuffAndSpawnRateUI.PanelId, BuffAndSpawnRateUI.Draw);
             RegisterDraw(StructureLocatorUI.PanelId, StructureLocatorUI.Draw);
+            RegisterDraw(StructureClipboardUI.PanelId, StructureClipboardUI.Draw);
             RegisterDraw(HudOverlayId, DrawHUDOverlay);
             RegisterDraw(TravelShopRefreshUI.PanelId, TravelShopRefreshUI.Draw);
             RegisterDraw(ReforgeRollbackUI.PanelId, ReforgeRollbackUI.Draw);
@@ -64,9 +66,11 @@ namespace QualityOfTerraria.UI
             if (!QuickStorageUI.IsOpen) UIRenderer.UnregisterPanelBounds(QuickStorageUI.PanelId);
             if (!ExtremeStorageUI.IsOpen) UIRenderer.UnregisterPanelBounds(ExtremeStorageUI.PanelId);
             if (!SuperVaultUI.IsOpen) UIRenderer.UnregisterPanelBounds(SuperVaultUI.PanelId);
+            if (!ItemGeneratorUI.IsExpanded) UIRenderer.UnregisterPanelBounds(ItemGeneratorUI.PanelId);
             if (!PlayerStatsUI.IsOpen) UIRenderer.UnregisterPanelBounds(PlayerStatsUI.PanelId);
             if (!BuffAndSpawnRateUI.IsOpen) UIRenderer.UnregisterPanelBounds(BuffAndSpawnRateUI.PanelId);
             if (!StructureLocatorUI.IsOpen) UIRenderer.UnregisterPanelBounds(StructureLocatorUI.PanelId);
+            if (!StructureClipboardUI.IsOpen) UIRenderer.UnregisterPanelBounds(StructureClipboardUI.PanelId);
             if (!TravelShopRefreshUI.Visible) UIRenderer.UnregisterPanelBounds(TravelShopRefreshUI.PanelId);
             if (!ReforgeRollbackUI.Visible) UIRenderer.UnregisterPanelBounds(ReforgeRollbackUI.PanelId);
         }
@@ -76,9 +80,11 @@ namespace QualityOfTerraria.UI
             QuickStorageUI.Update();
             ExtremeStorageUI.Update();
             SuperVaultUI.Update();
+            ItemGeneratorUI.Update();
             PlayerStatsUI.Update();
             BuffAndSpawnRateUI.Update();
             StructureLocatorUI.Update();
+            StructureClipboardUI.Update();
             TravelShopRefreshUI.Update();
             ReforgeRollbackUI.Update();
             StructureMapMarker.EnsureRegistered();
@@ -94,9 +100,11 @@ namespace QualityOfTerraria.UI
             QuickStorageUI.ResetSession();
             ExtremeStorageUI.ResetSession();
             SuperVaultUI.ResetSession();
+            ItemGeneratorUI.ResetSession();
             PlayerStatsUI.ResetSession();
             BuffAndSpawnRateUI.ResetSession();
             StructureLocatorUI.ResetSession();
+            StructureClipboardUI.ResetSession();
             TravelShopRefreshUI.ResetSession();
             ReforgeRollbackUI.ResetSession();
             WandsAndTools.ResetSession();
@@ -113,9 +121,11 @@ namespace QualityOfTerraria.UI
             UIRenderer.UnregisterPanelDraw(QuickStorageUI.PanelId);
             UIRenderer.UnregisterPanelDraw(ExtremeStorageUI.PanelId);
             UIRenderer.UnregisterPanelDraw(SuperVaultUI.PanelId);
+            UIRenderer.UnregisterPanelDraw(ItemGeneratorUI.PanelId);
             UIRenderer.UnregisterPanelDraw(PlayerStatsUI.PanelId);
             UIRenderer.UnregisterPanelDraw(BuffAndSpawnRateUI.PanelId);
             UIRenderer.UnregisterPanelDraw(StructureLocatorUI.PanelId);
+            UIRenderer.UnregisterPanelDraw(StructureClipboardUI.PanelId);
             UIRenderer.UnregisterPanelDraw(HudOverlayId);
             UIRenderer.UnregisterPanelDraw(TravelShopRefreshUI.PanelId);
             UIRenderer.UnregisterPanelDraw(ReforgeRollbackUI.PanelId);

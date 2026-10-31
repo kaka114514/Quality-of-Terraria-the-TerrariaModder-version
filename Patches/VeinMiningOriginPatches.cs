@@ -56,7 +56,8 @@ namespace QualityOfTerraria.Patches
             if (player == null || !player.active || player.dead) return;
             if (!WorldGen.InWorld(i, j, 3)) return;
             Tile tile = Main.tile[i, j];
-            if (tile == null || !tile.active() || !VeinMiningSystem.IsOre(tile.type)) return;
+            if (tile == null || !tile.active() || (!VeinMiningSystem.IsOre(tile.type) && !VeinMiningSystem.IsExtractinatorBlock(tile.type))) return;
+            // 先保存可能的原版破块来源；玩家提炼物开关在请求阶段核验，避免个人配置同步晚到时丢失来源。
             PacketOreKills++;
             __state = new State { Player = player, Type = tile.type, PreviousDrops = VeinMiningSystem.BeginDrops(player, i, j) };
             // 先保存掉落捕获上下文；原版 KillTile 只有返回后才确定瓦片确实被破坏。

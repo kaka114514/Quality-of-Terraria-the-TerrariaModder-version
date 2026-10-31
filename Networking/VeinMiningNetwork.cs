@@ -299,10 +299,10 @@ namespace QualityOfTerraria.Networking
                 Finish(slot, peer, false, "未持有有效镐子");
                 return;
             }
-            if (!VeinMiningSystem.IsOre(request.Type))
+            if (!VeinMiningSystem.IsChainable(request.Type, config))
             {
-                Mod.LogInfo($"[连锁挖矿服务端] 不是矿石: type={request.Type}");
-                Finish(slot, peer, false, "目标方块不是矿石");
+                Mod.LogInfo($"[连锁挖矿服务端] 方块未启用连锁: type={request.Type}");
+                Finish(slot, peer, false, "目标方块不支持连锁或未开启提炼物可连锁");
                 return;
             }
             Proof proof = Proofs.Find(p => ReferenceEquals(p.Player, peer.Player) && p.X == request.X && p.Y == request.Y && p.Type == request.Type && Main.GameUpdateCount - p.Frame <= 180);

@@ -26,6 +26,11 @@ namespace QualityOfTerraria.UI
             new ConfigPropertyMeta(), new ConfigPropertyMeta(), new ConfigPropertyMeta(),
             new ConfigPropertyMeta(), new ConfigPropertyMeta(), new ConfigPropertyMeta()
         };
+        internal static readonly ConfigPropertyMeta[] ItemGeneratorMarkers = {
+            new ConfigPropertyMeta(), new ConfigPropertyMeta(), new ConfigPropertyMeta(),
+            new ConfigPropertyMeta(), new ConfigPropertyMeta(), new ConfigPropertyMeta(),
+            new ConfigPropertyMeta(), new ConfigPropertyMeta(), new ConfigPropertyMeta()
+        };
         internal static readonly ConfigPropertyMeta[] AboutMarkers = {
             new ConfigPropertyMeta(), new ConfigPropertyMeta(), new ConfigPropertyMeta(),
             new ConfigPropertyMeta(), new ConfigPropertyMeta()
@@ -43,11 +48,12 @@ namespace QualityOfTerraria.UI
                 nameof(QualityOfTerrariaConfig.AnglerQuestNoCD), nameof(QualityOfTerrariaConfig.ImprovePrefix),
                 nameof(QualityOfTerrariaConfig.InfiniteAmmo), nameof(QualityOfTerrariaConfig.InfiniteSummonItems),
                 nameof(QualityOfTerrariaConfig.InfiniteThrowables), nameof(QualityOfTerrariaConfig.InfiniteWire),
-                nameof(QualityOfTerrariaConfig.WandMaterialNoConsume)
+
             },
             new[] {
                 nameof(QualityOfTerrariaConfig.ToolSpeedMultiplier), nameof(QualityOfTerrariaConfig.PlacementSpeedMultiplier),
-                nameof(QualityOfTerrariaConfig.VeinMiningEnabled), nameof(QualityOfTerrariaConfig.VeinMiningAutoLoot),
+                nameof(QualityOfTerrariaConfig.VeinMiningEnabled), nameof(QualityOfTerrariaConfig.VeinMiningExtractinatorBlocks),
+                nameof(QualityOfTerrariaConfig.VeinMiningAutoLoot),
                 nameof(QualityOfTerrariaConfig.VeinMiningRange), nameof(QualityOfTerrariaConfig.VeinMiningMaxBlocks),
                 nameof(QualityOfTerrariaConfig.VeinMiningCheckPickaxePower), nameof(QualityOfTerrariaConfig.VeinMiningMatchExactType),
                 nameof(QualityOfTerrariaConfig.VeinMiningShowMessages), nameof(QualityOfTerrariaConfig.ExtraTileReach),
@@ -62,7 +68,8 @@ namespace QualityOfTerraria.UI
                 nameof(QualityOfTerrariaConfig.BombsNoPlayerDamage), nameof(QualityOfTerrariaConfig.DisableNonPlayerBombTileDamage),
                 nameof(QualityOfTerrariaConfig.KeepFocus), nameof(QualityOfTerrariaConfig.TeamUnconditionalTeleport),
                 nameof(QualityOfTerrariaConfig.BedSpawnEverywhere), nameof(QualityOfTerrariaConfig.NoSleepRestrictions),
-                nameof(QualityOfTerrariaConfig.LavalessLavaSlime)
+                nameof(QualityOfTerrariaConfig.LavalessLavaSlime), nameof(QualityOfTerrariaConfig.PlatformFallthroughEnabled)
+                , nameof(QualityOfTerrariaConfig.ItemGeneratorEnabled)
             },
             new[] {
                 nameof(QualityOfTerrariaConfig.HostileSpawnRateMultiplier), nameof(QualityOfTerrariaConfig.CritterSpawnRateMultiplier),
@@ -97,7 +104,7 @@ namespace QualityOfTerraria.UI
         internal static bool IsProfileRenaming => _profileRenaming;
         internal static void ResetSession()
         {
-            _offset = 0; _profileOffset = 0; ExpandedCategories.Clear(); ResetProfileInput();
+            _offset = 0; _profileOffset = 0; ExpandedCategories.Clear(); ResetProfileInput(); ItemGeneratorUI.ResetSession();
         }
         internal static void SetEnabled(bool enabled) { _enabled = enabled; }
         internal static string[] GetCategoryNames() => (string[])CategoryNames.Clone();
@@ -172,6 +179,9 @@ namespace QualityOfTerraria.UI
                 if (category == CategoryNames.Length - 1)
                     foreach (ConfigPropertyMeta marker in AboutMarkers)
                         rows.Add(ValueTuple.Create("property", (object)marker, source));
+                if (category == 0)
+                    foreach (ConfigPropertyMeta marker in ItemGeneratorMarkers.Take(ItemGeneratorUI.RowCount))
+                        rows.Add(ValueTuple.Create("property", (object)marker, source));
             }
         }
 
@@ -190,6 +200,8 @@ namespace QualityOfTerraria.UI
         {
             if (modId != ModId || !ReferenceEquals(config, Mod.Config)) return true;
             if (PotionBlacklistUI.IsMarker(metadata)) return PotionBlacklistUI.Draw(x, y, width, metadata, config);
+            int generatorRow = Array.IndexOf(ItemGeneratorMarkers, metadata);
+            if (generatorRow >= 0) { ItemGeneratorUI.DrawRow(x, y, width, generatorRow); return false; }
             int aboutRow = Array.IndexOf(AboutMarkers, metadata);
             if (aboutRow >= 0) return DrawAboutRow(x, y, width, aboutRow);
             int category = Array.IndexOf(CategoryMarkers, metadata);

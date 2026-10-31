@@ -35,7 +35,7 @@ namespace QualityOfTerraria.Patches
             if (!_pressed || Main.gameMenu || Main.dedServ || !Mod.WorldActive) return;
             if (!Main.playerInventory && !Main.ingameOptionsWindow && !ModMenu.IsVisible &&
                 !UI.ExtremeStorageUI.IsOpen && !UI.SuperVaultUI.IsOpen && !UI.PlayerStatsUI.IsOpen &&
-                !UI.BuffAndSpawnRateUI.IsOpen && !UI.StructureLocatorUI.IsOpen) return;
+                !UI.BuffAndSpawnRateUI.IsOpen && !UI.StructureLocatorUI.IsOpen && !UI.ItemGeneratorUI.IsExpanded && !UI.StructureClipboardUI.IsOpen) return;
             Main.mouseLeft = true;
             Main.mouseLeftRelease = true;
         }

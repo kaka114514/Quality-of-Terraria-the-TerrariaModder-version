@@ -50,7 +50,9 @@ namespace QualityOfTerraria
             Features.VeinConfigMigration.Apply(context);
 
             // 注册常用快捷键（严格对应用户指定键位，杜绝占用 F6~F12）
-            context.RegisterKeybind("space-wand", "快速放置", "切换快速放置，开启后手持方块/平台/墙按住鼠标左键拖拽铺设", "P", WandsAndTools.ExecuteQuickPlace);
+            context.RegisterKeybind("space-wand", "快速工具", "P键循环切换快速放置、破坏、复制和粘贴模式", "P", WandsAndTools.ExecuteQuickPlace);
+            context.RegisterKeybind("structure-clipboard", "结构复制与粘贴面板", "Ctrl+P打开本地结构预览和材料设置面板", "CTRL+P", UI.StructureClipboardUI.Toggle);
+            context.RegisterKeybind("item-generator", "物品生成器", "开启设置后按 T 打开物品生成器", "T", UI.ItemGeneratorUI.ToggleFromHotkey);
             context.RegisterKeybind("liquid-wand", "液体魔杖模式切换", "循环切换关/水/岩浆/微光/蜂蜜模式，按住[;]吸收，按住[']生成", "L", WandsAndTools.ExecuteLiquidWand);
             context.RegisterKeybind("npc-home", "城镇NPC立即回家", "一键将所有城镇NPC召回各自房间", "N", WandsAndTools.ExecuteNPCHome);
             context.RegisterKeybind("quick-nurse", "快捷护士瞬间治疗", "一键护士回满血与魔力并清除Debuff(按原版收费)", "H", WandsAndTools.ExecuteQuickNurse);
@@ -141,6 +143,7 @@ namespace QualityOfTerraria
             FeatureNetwork.Initialize();
             VeinMiningNetwork.Initialize();
             PylonSync.Initialize();
+            Features.StructureClipboard.Initialize();
             Features.VeinMiningSystem.Suspended = VeinMinerLegacyLoaded;
             UI.RemoteStorageSnapshots.Initialize();
             if (!Main.dedServ)
