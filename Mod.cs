@@ -143,6 +143,7 @@ namespace QualityOfTerraria
             FeatureNetwork.Initialize();
             VeinMiningNetwork.Initialize();
             PylonSync.Initialize();
+            PylonSync.BeginWorldSession();
             Features.StructureClipboard.Initialize();
             Features.VeinMiningSystem.Suspended = VeinMinerLegacyLoaded;
             UI.RemoteStorageSnapshots.Initialize();

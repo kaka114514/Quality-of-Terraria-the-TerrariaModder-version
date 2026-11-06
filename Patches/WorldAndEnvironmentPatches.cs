@@ -59,33 +59,101 @@ namespace QualityOfTerraria.Patches
             }
         }
 
-        // 原版地图图标和点击传送都读取 Pylons 属性；联机客户端不主动刷新此列表，
-        // 因此绘制地图前从本地已同步的晶塔实体重建列表，沿用原版图标命中与传送请求。
+        // 原版地图和点击传送都读取 Pylons 属性；从补丁已经收到的原版列表出发合并服务器数据，避免再次调用同一个 getter。
         [HarmonyPatch(typeof(TeleportPylonsSystem), "get_Pylons")]
         public static class ClientPylonMapListPatch
         {
-            internal static void ReplaceClientPylons(List<TeleportPylonInfo> destination, IEnumerable<TeleportPylonInfo> localPylons)
-            {
-                destination.Clear();
-                destination.AddRange(localPylons);
-            }
-
             public static void Postfix(ref List<TeleportPylonInfo> __result)
             {
                 if (Main.netMode != 1 || __result == null) return;
+                var displayPylons = Networking.PylonSync.GetClientMapPylons(__result);
                 if (Networking.PylonSync.Ready)
                 {
-                    Networking.PylonSync.ReplaceClientPylons(__result, Networking.PylonSync.Pylons);
+                    Networking.PylonSync.ReplaceClientPylons(__result, displayPylons);
                     return;
                 }
-                var localPylons = new List<TeleportPylonInfo>();
-                foreach (TileEntity tileEntity in TileEntity.ByPosition.Values)
-                {
-                    var pylon = tileEntity as TETeleportationPylon;
-                    if (pylon == null || !pylon.TryGetPylonType(out TeleportPylonType type)) continue;
-                    localPylons.Add(new TeleportPylonInfo { PositionInTiles = pylon.Position, TypeOfPylon = type });
-                }
-                ReplaceClientPylons(__result, localPylons);
+                Networking.PylonSync.MergeClientPylons(__result, displayPylons);
+            }
+        }
+
+        [HarmonyPatch(typeof(MapIconOverlay), nameof(MapIconOverlay.Draw))]
+        public static class PylonMapLayerDrawPatch
+        {
+            public static void Prefix(out List<TeleportPylonInfo> __state)
+            {
+                __state = Networking.PylonSync.BeginMapDraw();
+            }
+
+            public static Exception Finalizer(Exception __exception, List<TeleportPylonInfo> __state)
+            {
+                Networking.PylonSync.EndMapDraw(__state);
+                return __exception;
+            }
+        }
+
+        [HarmonyPatch(typeof(TeleportPylonsSystem), nameof(TeleportPylonsSystem.AddForClient))]
+        public static class ClientPylonAddedPatch
+        {
+            public static void Postfix(TeleportPylonInfo info)
+            {
+                Networking.PylonSync.ApplyClientPylonAdded(info);
+            }
+        }
+
+        [HarmonyPatch(typeof(TeleportPylonsSystem), nameof(TeleportPylonsSystem.RemoveForClient))]
+        public static class ClientPylonRemovedPatch
+        {
+            public static void Postfix(TeleportPylonInfo info)
+            {
+                Networking.PylonSync.ApplyClientPylonRemoved(info);
+            }
+        }
+
+        [HarmonyPatch(typeof(TETeleportationPylon), nameof(TETeleportationPylon.OnPlaced))]
+        public static class PylonEntityPlacedPatch
+        {
+            public static void Postfix()
+            {
+                Networking.PylonSync.RefreshServerPylonsImmediately();
+            }
+        }
+
+        [HarmonyPatch(typeof(TETeleportationPylon), nameof(TETeleportationPylon.OnRemoved))]
+        public static class PylonEntityRemovedPatch
+        {
+            public static void Postfix()
+            {
+                Networking.PylonSync.RefreshServerPylonsImmediately();
+            }
+        }
+
+        [HarmonyPatch(typeof(TETeleportationPylon), nameof(TETeleportationPylon.PlacementPreviewHook_AfterPlacement))]
+        public static class ClientPylonAfterPlacementPredictionPatch
+        {
+            public static void Postfix(int x, int y, int type, int style)
+            {
+                if (Main.netMode != 1 || type != 597) return;
+                TeleportPylonInfo info;
+                if (Networking.PylonSync.TryGetPlacedPylonInfo(x, y, style, out info))
+                    Networking.PylonSync.ApplyClientPylonAdded(info);
+            }
+        }
+
+        [HarmonyPatch(typeof(WorldGen), nameof(WorldGen.KillTile))]
+        public static class ClientPylonKillPredictionPatch
+        {
+            public static void Prefix(int i, int j, out TeleportPylonInfo? __state)
+            {
+                __state = null;
+                if (Main.netMode != 1) return;
+                TeleportPylonInfo info;
+                if (Networking.PylonSync.TryFindPylonAround(i, j, out info)) __state = info;
+            }
+
+            public static void Postfix(TeleportPylonInfo? __state)
+            {
+                if (Main.netMode == 1 && __state.HasValue)
+                    Networking.PylonSync.ApplyClientPylonRemoved(__state.Value);
             }
         }
 

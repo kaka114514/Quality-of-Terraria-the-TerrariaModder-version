@@ -153,7 +153,7 @@ namespace QualityOfTerraria
         [Client]
         [Label("金币自动存入猪猪钱罐")]
         [Description("拾取的金币自动转移至猪猪钱罐中，防止意外掉落。")]
-        public bool AutoSaveCoins { get; set; } = true;
+        public bool AutoSaveCoins { get; set; } = false;
 
         [Client]
         [Label("无限弹药")]
