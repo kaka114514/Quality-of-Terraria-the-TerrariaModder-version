@@ -13,11 +13,12 @@ namespace QualityOfTerraria.Networking
     internal static class SettingsSync
     {
         private const string Prefix = "qot.settings.";
-        private const string Version = "1.1.8";
+        private const string Version = "1.2.5";
         private const int MaxRequests = 16;
         private static string _clientNonce, _room;
         private static int _lifecycle, _helloFrames;
         private static Dictionary<string, object> _lastPersonal;
+        private static ConfigPropertyMeta _blacklistMetadata;
         private static Action<int, string, string> _requestHandler;
         private static Action<bool, string, string> _responseHandler;
         private static readonly Dictionary<int, Peer> Peers = new Dictionary<int, Peer>();
@@ -154,7 +155,7 @@ namespace QualityOfTerraria.Networking
         private static void SendPersonalChanges()
         {
             var snapshot = PersonalSnapshot();
-            if (_lastPersonal != null && snapshot.Count == _lastPersonal.Count && snapshot.All(p => _lastPersonal.ContainsKey(p.Key) && Equals(p.Value, _lastPersonal[p.Key]))) return;
+            if (_lastPersonal != null && snapshot.Count == _lastPersonal.Count && snapshot.All(p => _lastPersonal.ContainsKey(p.Key) && ValuesEqual(p.Value, _lastPersonal[p.Key]))) return;
             string error;
             if (!ValidateSnapshot(snapshot, out error)) { Status = error; return; }
             NetSyncPayload.SendRequest(Prefix + "personal", Write(w => { Header(w); WriteSnapshot(w, snapshot); }));
@@ -191,13 +192,22 @@ namespace QualityOfTerraria.Networking
             NetSyncPayload.SendRequest(Prefix + "decision", Write(w => { Header(w); w.Write(row.Id); w.Write(approve); }));
         }
 
-        private static IEnumerable<ConfigPropertyMeta> Metadata()
+        internal static IEnumerable<ConfigPropertyMeta> Metadata()
         {
-            return Mod.Config.GetPropertyMetadata().Where(p => p.Property.DeclaringType == typeof(QualityOfTerrariaConfig)
+            // Core 0.4.1 的元数据只包含标量，黑名单数组需要显式加入个人配置协议。
+            if (_blacklistMetadata == null)
+            {
+                _blacklistMetadata = new ConfigPropertyMeta();
+                typeof(ConfigPropertyMeta).GetProperty(nameof(ConfigPropertyMeta.Property)).SetValue(_blacklistMetadata,
+                    typeof(QualityOfTerrariaConfig).GetProperty(nameof(QualityOfTerrariaConfig.InfinitePotionBlacklist)));
+                typeof(ConfigPropertyMeta).GetProperty(nameof(ConfigPropertyMeta.Scope)).SetValue(_blacklistMetadata, ConfigScope.Client);
+                typeof(ConfigPropertyMeta).GetProperty(nameof(ConfigPropertyMeta.Label)).SetValue(_blacklistMetadata, "药水增益黑名单");
+            }
+            return Mod.Config.GetPropertyMetadata().Concat(new[] { _blacklistMetadata }).Where(p => p.Property.DeclaringType == typeof(QualityOfTerrariaConfig)
                 && p.Property.CanWrite && Attribute.IsDefined(p.Property, typeof(LabelAttribute))
                 && (Attribute.IsDefined(p.Property, typeof(ClientAttribute)) || Attribute.IsDefined(p.Property, typeof(ServerAttribute)))
                 && !p.RestartRequired && (p.PropertyType == typeof(bool) || p.PropertyType == typeof(int)
-                    || p.PropertyType == typeof(float) || p.PropertyType == typeof(double)));
+                    || p.PropertyType == typeof(float) || p.PropertyType == typeof(double) || p.PropertyType == typeof(int[])));
         }
 
         internal static bool ValidateSnapshot(Dictionary<string, object> snapshot, out string error)
@@ -211,6 +221,13 @@ namespace QualityOfTerraria.Networking
                 if (!metadata.TryGetValue(pair.Key, out property)) { error = "不支持的配置项：" + pair.Key; return false; }
                 if (pair.Value == null || pair.Value.GetType() != property.PropertyType) { error = "配置类型不匹配：" + pair.Key; return false; }
                 if (property.PropertyType == typeof(bool)) continue;
+                if (property.PropertyType == typeof(int[]))
+                {
+                    var values = (int[])pair.Value;
+                    if (values.Length > 64 || !values.SequenceEqual(QualityOfTerrariaConfig.NormalizePotionBlacklist(values)))
+                    { error = "药水黑名单配置无效"; return false; }
+                    continue;
+                }
                 double number = Convert.ToDouble(pair.Value);
                 if (double.IsNaN(number) || double.IsInfinity(number) || (property.Min.HasValue && number < property.Min.Value)
                     || (property.Max.HasValue && number > property.Max.Value)) { error = "配置超出允许范围：" + pair.Key; return false; }
@@ -230,7 +247,7 @@ namespace QualityOfTerraria.Networking
             {
                 using (var reader = Read(payload))
                 {
-                    if (reader.ReadString() != Version) { Reject(slot, "模组版本不一致，需使用 v" + Version); return; }
+                    if (reader.ReadString() != Version) { Reject(slot, "设置同步协议不一致，请让房主、服务器和所有玩家更新为同一修复构建"); return; }
                     string nonce = reader.ReadString();
                     if (!Nonce(nonce)) return;
                     if (operation == Prefix + "hello")
@@ -513,6 +530,13 @@ namespace QualityOfTerraria.Networking
                 else if (pair.Value is int) { writer.Write((byte)2); writer.Write((int)pair.Value); }
                 else if (pair.Value is float) { writer.Write((byte)3); writer.Write((float)pair.Value); }
                 else if (pair.Value is double) { writer.Write((byte)4); writer.Write((double)pair.Value); }
+                else if (pair.Value is int[])
+                {
+                    var values = (int[])pair.Value;
+                    if (values.Length > 64) throw new FormatException();
+                    writer.Write((byte)5); writer.Write(values.Length);
+                    foreach (int value in values) writer.Write(value);
+                }
                 else throw new FormatException();
             }
         }
@@ -531,11 +555,21 @@ namespace QualityOfTerraria.Networking
                     case 2: value = reader.ReadInt32(); break;
                     case 3: value = reader.ReadSingle(); break;
                     case 4: value = reader.ReadDouble(); break;
+                    case 5:
+                        int length = reader.ReadInt32();
+                        if (length < 0 || length > 64) throw new FormatException();
+                        var values = new int[length];
+                        for (int j = 0; j < length; j++) values[j] = reader.ReadInt32();
+                        value = values;
+                        break;
                     default: throw new FormatException();
                 }
                 snapshot.Add(key, value);
             }
             return snapshot;
         }
+
+        private static bool ValuesEqual(object left, object right)
+            => left is int[] && right is int[] ? ((int[])left).SequenceEqual((int[])right) : Equals(left, right);
     }
 }

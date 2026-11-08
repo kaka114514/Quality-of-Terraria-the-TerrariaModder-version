@@ -172,7 +172,7 @@ namespace QualityOfTerraria
                     string saveError;
                     if (!Networking.SettingsSync.SaveVerified(Mod.Config, out saveError)) throw new IOException(saveError);
                 }
-                if (CanApplyServerSettings() && ConfigManager.GetCurrentScope() == ConfigScope.Client)
+                if ((Main.netMode == 0 || Terraria.Netplay.IsHostAndPlay) && ConfigManager.GetCurrentScope() == ConfigScope.Client)
                 {
                     string worldError;
                     if (!Networking.LocalWorldSettings.Save(out worldError)) throw new IOException(worldError);
@@ -186,18 +186,25 @@ namespace QualityOfTerraria
                 return false;
             }
             message = "已应用配置：" + _selectedName;
+            if (Main.netMode == 1 && CanApplyServerSettings())
+            {
+                foreach (var change in changes.Where(change => change.Item1.Scope == ConfigScope.Server))
+                    TerrariaModder.Core.Net.NetSync.SendConfigChangeRequest("quality-of-terraria", change.Item1.Key,
+                        change.Item2, change.Item1.PropertyType);
+                message += "；服务器设置已发送，等待服务器确认";
+            }
             if (skipped.Count > 0) message += "；未应用服务器设置（需要房主或服务器确认）";
             return true;
         }
 
         private static bool CanApplyServerSettings()
         {
-            return Main.netMode == 0 || Terraria.Netplay.IsHostAndPlay;
+            return Main.netMode == 0 || Terraria.Netplay.IsHostAndPlay || TerrariaModder.Core.Net.NetSync.LocalPlayerIsAdmin;
         }
 
         private static IEnumerable<ConfigPropertyMeta> GetMetadata()
         {
-            return Mod.Config.GetPropertyMetadata().Where(p => p.Property.DeclaringType == typeof(QualityOfTerrariaConfig)
+            return Networking.SettingsSync.Metadata().Where(p => p.Property.DeclaringType == typeof(QualityOfTerrariaConfig)
                 && p.Property.CanRead && p.Property.CanWrite && !p.RestartRequired && IsSupportedType(p.PropertyType)
                 && Attribute.IsDefined(p.Property, typeof(LabelAttribute))
                 && (Attribute.IsDefined(p.Property, typeof(ClientAttribute)) || Attribute.IsDefined(p.Property, typeof(ServerAttribute))));

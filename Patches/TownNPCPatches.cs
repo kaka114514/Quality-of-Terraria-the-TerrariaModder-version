@@ -34,9 +34,10 @@ namespace QualityOfTerraria.Patches
         [HarmonyPatch(typeof(Terraria.GameContent.ShopHelper), nameof(Terraria.GameContent.ShopHelper.GetShoppingSettings))]
         public static class MaxHappinessPatch
         {
-            public static void Postfix(ref ShoppingSettings __result)
+            public static void Postfix(Player __0, ref ShoppingSettings __result)
             {
-                if (Mod.Config != null && Mod.Config.MaxNPCHappiness)
+                var config = __0 == null ? null : Networking.SettingsSync.GetPlayerConfig(__0.whoAmI);
+                if (config != null && config.MaxNPCHappiness)
                 {
                     __result.PriceAdjustment = 0.75f; // 最优价格折扣
                 }

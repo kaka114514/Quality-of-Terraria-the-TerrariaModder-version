@@ -130,7 +130,7 @@ namespace QualityOfTerraria.UI
         {
             if (!isClient || modId != ModId || !ReferenceEquals(config, Mod.Config) || !ShouldMoveServerPropertyToClientTab(metadata))
                 return isClient;
-            return Main.netMode != 0 && !Netplay.IsHostAndPlay;
+            return Main.netMode != 0 && !Netplay.IsHostAndPlay && !TerrariaModder.Core.Net.NetSync.LocalPlayerIsAdmin;
         }
 
         // Core 0.4.1 的配置页按 (kind,value,mod) 行绘制。只扩展本模组标题后的行，
@@ -444,6 +444,16 @@ namespace QualityOfTerraria.UI
     [HarmonyPatch(typeof(ModMenu), "AutoSaveConfig")]
     internal static class ServerConfigSavePatch
     {
+        private static bool Prefix(string modId, ConfigPropertyMeta changedMeta, ModConfig changedConfig)
+        {
+            if (modId != "quality-of-terraria" || !ReferenceEquals(changedConfig, Mod.Config) || changedMeta == null ||
+                changedMeta.Scope != ConfigScope.Server || Main.netMode != 1) return true;
+
+            TerrariaModder.Core.Net.NetSync.SendConfigChangeRequest(modId, changedMeta.Key,
+                changedMeta.GetValue(changedConfig), changedMeta.PropertyType);
+            return false;
+        }
+
         private static void Postfix(string modId, ConfigPropertyMeta changedMeta, ModConfig changedConfig)
         {
             if (modId != "quality-of-terraria" || !ReferenceEquals(changedConfig, Mod.Config) || changedMeta == null ||

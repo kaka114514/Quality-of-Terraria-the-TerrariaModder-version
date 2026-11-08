@@ -75,9 +75,10 @@ namespace QualityOfTerraria.Patches
         {
             public static void Postfix(Player __instance, Item item, ref int __result)
             {
-                if (Mod.Config != null && Mod.Config.ExtraGrabRange > 0)
+                var config = Networking.SettingsSync.GetPlayerConfig(__instance.whoAmI);
+                if (config != null && config.ExtraGrabRange > 0)
                 {
-                    __result += Mod.Config.ExtraGrabRange * 16;
+                    __result += config.ExtraGrabRange * 16;
                 }
             }
         }
@@ -218,9 +219,10 @@ namespace QualityOfTerraria.Patches
         [HarmonyPatch(typeof(Player), nameof(Player.DropTombstone))]
         public static class NoTombstonePatch
         {
-            public static bool Prefix()
+            public static bool Prefix(Player __instance)
             {
-                if (Mod.Config != null && Mod.Config.NoTombstones)
+                var config = __instance == null ? null : Networking.SettingsSync.GetPlayerConfig(__instance.whoAmI);
+                if (config != null && config.NoTombstones)
                 {
                     return false; // 拦截墓碑生成
                 }
@@ -232,9 +234,10 @@ namespace QualityOfTerraria.Patches
         [HarmonyPatch(typeof(Player), "GetRespawnTime")]
         public static class FastRespawnPatch
         {
-            public static void Postfix(ref int __result)
+            public static void Postfix(Player __instance, ref int __result)
             {
-                if (Mod.Config != null && (AnyBossAlive() ? Mod.Config.BossQuickRespawn : Mod.Config.QuickRespawn))
+                var config = __instance == null ? null : Networking.SettingsSync.GetPlayerConfig(__instance.whoAmI);
+                if (config != null && (AnyBossAlive() ? config.BossQuickRespawn : config.QuickRespawn))
                     __result = 90;
             }
 
@@ -256,7 +259,8 @@ namespace QualityOfTerraria.Patches
         {
             public static void Prefix(Player __instance)
             {
-                if (Mod.Config == null || !Mod.Config.PreserveBuffsOnDeath || __instance == null)
+                var config = __instance == null ? null : Networking.SettingsSync.GetPlayerConfig(__instance.whoAmI);
+                if (config == null || !config.PreserveBuffsOnDeath)
                     return;
 
                 var buffs = new List<KeyValuePair<int, int>>();
@@ -277,18 +281,19 @@ namespace QualityOfTerraria.Patches
         {
             public static void Postfix(Player __instance)
             {
-                if (Mod.Config == null || __instance == null)
+                var config = __instance == null ? null : Networking.SettingsSync.GetPlayerConfig(__instance.whoAmI);
+                if (config == null)
                     return;
 
                 // 满血满蓝
-                if (Mod.Config.RespawnFullHealth)
+                if (config.RespawnFullHealth)
                 {
                     __instance.statLife = __instance.statLifeMax2;
                     __instance.statMana = __instance.statManaMax2;
                 }
 
                 // 恢复死前保存的增益
-                if (Mod.Config.PreserveBuffsOnDeath && _savedBuffs.TryGetValue(__instance.whoAmI, out var buffs))
+                if (config.PreserveBuffsOnDeath && _savedBuffs.TryGetValue(__instance.whoAmI, out var buffs))
                 {
                     foreach (var pair in buffs)
                     {

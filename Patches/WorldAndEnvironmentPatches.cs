@@ -205,7 +205,8 @@ namespace QualityOfTerraria.Patches
         {
             public static void Postfix(Player __instance)
             {
-                if (Mod.Config != null && Mod.Config.FastExtractinator && __instance != null)
+                var config = __instance == null ? null : Networking.SettingsSync.GetPlayerConfig(__instance.whoAmI);
+                if (config != null && config.FastExtractinator)
                 {
                     // ItemCheck consumes the input only when itemTime == itemTimeMax.
                     __instance.itemTimeMax = 1;

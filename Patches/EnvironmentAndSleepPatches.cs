@@ -15,9 +15,10 @@ namespace QualityOfTerraria.Patches
         [HarmonyPatch(typeof(PlayerSleepingHelper), "DoesPlayerHaveReasonToActUpInBed")]
         public static class SleepRestrictionsPatch
         {
-            public static bool Prefix(ref bool __result)
+            public static bool Prefix(Player __0, ref bool __result)
             {
-                if (Mod.Config != null && Mod.Config.NoSleepRestrictions)
+                var config = __0 == null ? null : Networking.SettingsSync.GetPlayerConfig(__0.whoAmI);
+                if (config != null && config.NoSleepRestrictions)
                 {
                     __result = false;
                     return false; // 直接允许安睡
@@ -48,7 +49,7 @@ namespace QualityOfTerraria.Patches
         {
             public static void Postfix(int i, int j)
             {
-                if (Mod.Config == null || !Mod.Config.ShakeTreeAlwaysFruit)
+                if (Main.netMode == 1 || Mod.Config == null || !Mod.Config.ShakeTreeAlwaysFruit)
                     return;
 
                 WorldGen.GetTreeBottom(i, j, out int x, out int y);
@@ -106,7 +107,7 @@ namespace QualityOfTerraria.Patches
         {
             public static void Postfix(int gemType, int seedType, Tile tileCache, ref int dropItem, ref int secondaryItem)
             {
-                if (Mod.Config != null && Mod.Config.GemTreeAlwaysGem)
+                if (Main.netMode != 1 && Mod.Config != null && Mod.Config.GemTreeAlwaysGem)
                 {
                     dropItem = gemType;
                     secondaryItem = seedType;
@@ -122,7 +123,7 @@ namespace QualityOfTerraria.Patches
 
             public static void Postfix(int i, int j, int type)
             {
-                if (_isGrowing) return;
+                if (Main.netMode == 1 || _isGrowing) return;
 
                 if (Mod.Config != null && Mod.Config.FastPumpkinGrowth)
                 {
@@ -181,9 +182,10 @@ namespace QualityOfTerraria.Patches
         [HarmonyPatch(typeof(Player), nameof(Player.HasUnityPotion))]
         public static class HasUnityPotionPatch
         {
-            public static void Postfix(ref bool __result)
+            public static void Postfix(Player __instance, ref bool __result)
             {
-                if (Mod.Config != null && Mod.Config.TeamUnconditionalTeleport)
+                var config = __instance == null ? null : Networking.SettingsSync.GetPlayerConfig(__instance.whoAmI);
+                if (config != null && config.TeamUnconditionalTeleport)
                 {
                     __result = true;
                 }
@@ -193,9 +195,10 @@ namespace QualityOfTerraria.Patches
         [HarmonyPatch(typeof(Player), nameof(Player.TakeUnityPotion))]
         public static class TakeUnityPotionPatch
         {
-            public static bool Prefix()
+            public static bool Prefix(Player __instance)
             {
-                if (Mod.Config != null && Mod.Config.TeamUnconditionalTeleport)
+                var config = __instance == null ? null : Networking.SettingsSync.GetPlayerConfig(__instance.whoAmI);
+                if (config != null && config.TeamUnconditionalTeleport)
                 {
                     return false; // 不消耗虫洞药水
                 }

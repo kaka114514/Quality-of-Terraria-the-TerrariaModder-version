@@ -67,7 +67,7 @@ namespace QualityOfTerraria
                 if (!raw.ContainsKey(nameof(PylonTeleportWithoutNearbyPlayer))) PylonTeleportWithoutNearbyPlayer = universal;
                 if (!raw.ContainsKey(nameof(PylonTeleportIgnoreBiome))) PylonTeleportIgnoreBiome = universal;
             }
-            if (!raw.ContainsKey(nameof(InfinitePotionBlacklist)))
+            if (!raw.ContainsKey(nameof(InfinitePotionBlacklist)) && !raw.ContainsKey(nameof(InfinitePotionBlacklistData)))
                 InfinitePotionBlacklist = DefaultPotionBlacklist();
             if (!raw.ContainsKey(nameof(HostileSpawnRateMultiplier)) && raw.TryGetValue("SpawnRateMultiplier", out object oldSpawn))
             {
@@ -116,6 +116,15 @@ namespace QualityOfTerraria
         public int RedPotionRequirement { get; set; } = 20;
 
         private int[] _infinitePotionBlacklist = DefaultPotionBlacklist();
+
+        // Core 0.4.1 只保存标量，用字符串保存数组；界面和网络仍使用类型安全的数组属性。
+        [Client]
+        public string InfinitePotionBlacklistData
+        {
+            get => string.Join(",", _infinitePotionBlacklist.Select(value => value.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            set => InfinitePotionBlacklist = string.IsNullOrWhiteSpace(value) ? Array.Empty<int>() :
+                value.Split(',').Select(part => int.Parse(part, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+        }
 
         private static int[] DefaultPotionBlacklist()
             => new[] {

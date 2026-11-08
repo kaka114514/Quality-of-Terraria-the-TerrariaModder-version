@@ -155,7 +155,7 @@ namespace QualityOfTerraria.UI
             var values = new HashSet<int>(qot.InfinitePotionBlacklist ?? Array.Empty<int>());
             if (!values.Add(type)) values.Remove(type);
             qot.InfinitePotionBlacklist = values.ToArray();
-            ConfigPropertyMeta property = qot.GetPropertyMetadata().FirstOrDefault(meta => meta.Key == nameof(QualityOfTerrariaConfig.InfinitePotionBlacklist));
+            ConfigPropertyMeta property = qot.GetPropertyMetadata().FirstOrDefault(meta => meta.Key == nameof(QualityOfTerrariaConfig.InfinitePotionBlacklistData));
             if (property != null) SaveConfig?.Invoke(null, new object[] { "quality-of-terraria", property, qot });
         }
     }
