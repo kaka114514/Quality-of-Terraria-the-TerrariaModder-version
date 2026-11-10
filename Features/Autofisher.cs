@@ -69,7 +69,9 @@ namespace QualityOfTerraria.Features
             bobber.Center = new Vector2(pool.Value.X * 16 + 8, pool.Value.Y * 16 + 8);
             bobber.wet = true;
             bobber.FishingCheck();
-            if (bobber.localAI[1] == 0f) { SetStatus("本次未钓获（原版水池、群落与渔力判定）"); return; }
+            // 熔岩等待进度也会写入 localAI[1]；只有原版同时记录结果和鱼饵类型才算上钩。
+            if (bobber.localAI[1] == 0f || bobber.localAI[2] <= 0f)
+            { SetStatus("本次未钓获（原版水池、群落与渔力判定）"); return; }
             int baitType;
             if (!Consume(player, bobber, out baitType)) { SetStatus("原版鱼饵检查未通过"); return; }
             bobber.ai[0] = 1f;

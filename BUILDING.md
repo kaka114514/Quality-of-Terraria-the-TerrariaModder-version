@@ -13,6 +13,8 @@
 
 ## 回归检查
 
+熔岩自动钓鱼回归：构建客户端后运行 `pwsh -NoProfile -File tests/Autofisher.Lava.Tests.ps1`。测试使用真实游戏的钓鱼掉落表、液体检测、装备效果、上钩、鱼饵消耗与收杆方法，覆盖单机及联机客户端状态下的熔岩许可组合、未上钩的等待进度、水和蜂蜜；物品交付与装饰鱼显示由测试捕获，不代替游戏内联机实测。
+
 原版保存后鼠标记录兼容：`pwsh -NoProfile -File tests/CursorJournal.VanillaSave.Tests.ps1`。测试在 `bin/cursor-journal-tests/` 创建角色，调用原版保存／加载验证过期鼠标记录恢复、当前物品数量不变、记录备份、下一次进入，以及库存不一致、损坏文件和未知交易仍保持保护；不读写实际玩家存档。
 
 本轮快捷收纳、标记箱效果、倍率设置与世界控制回归：构建客户端后执行 `pwsh -NoProfile -File tests/PortableStorage.Tests.ps1`，再执行 `pwsh -NoProfile -File tests/RemoteStorage.NonHost.Tests.ps1`。前者使用真实 Terraria/Core/生产程序集验证窗口保活、药水阈值、远程制作站、信息配件、原版服务器扣料、配置迁移、时间边界及房主权限；捕获网络和音效，不代替真实绘制、输入法及双客户端验收。
