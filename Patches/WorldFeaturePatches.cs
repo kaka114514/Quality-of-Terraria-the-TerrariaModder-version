@@ -73,7 +73,11 @@ namespace QualityOfTerraria.Patches
         [HarmonyPatch(typeof(TeleportPylonsSystem), "HandleTeleportRequest")]
         public static class PylonTeleportRequestScopePatch
         {
-            public static void Prefix() { _pylonTeleportRequestDepth++; }
+            public static void Prefix()
+            {
+                Networking.PylonSync.EnsureServerPylonsInVanillaList();
+                _pylonTeleportRequestDepth++;
+            }
             public static Exception Finalizer(Exception __exception)
             {
                 _pylonTeleportRequestDepth = Math.Max(0, _pylonTeleportRequestDepth - 1);

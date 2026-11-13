@@ -112,8 +112,9 @@ namespace QualityOfTerraria.Patches
         [HarmonyPatch(typeof(TETeleportationPylon), nameof(TETeleportationPylon.OnPlaced))]
         public static class PylonEntityPlacedPatch
         {
-            public static void Postfix()
+            public static void Postfix(TETeleportationPylon __instance)
             {
+                Networking.PylonSync.ApplyServerPylonAdded(__instance);
                 Networking.PylonSync.RefreshServerPylonsImmediately();
             }
         }
@@ -121,8 +122,9 @@ namespace QualityOfTerraria.Patches
         [HarmonyPatch(typeof(TETeleportationPylon), nameof(TETeleportationPylon.OnRemoved))]
         public static class PylonEntityRemovedPatch
         {
-            public static void Postfix()
+            public static void Postfix(TETeleportationPylon __instance)
             {
+                Networking.PylonSync.ApplyServerPylonRemoved(__instance);
                 Networking.PylonSync.RefreshServerPylonsImmediately();
             }
         }

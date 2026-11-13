@@ -15,6 +15,7 @@ namespace QualityOfTerraria.Networking
         private const ulong SnapshotRequestInterval = 30;
         private const ulong SnapshotRefreshInterval = 120;
         private static readonly List<TeleportPylonInfo> ClientPylons = new List<TeleportPylonInfo>();
+        private static readonly List<TeleportPylonInfo> ServerPylons = new List<TeleportPylonInfo>();
         private static bool _initialized, _ready;
         private static int _sessionNetMode = -1;
         private static ulong _lastRequest;
@@ -62,6 +63,7 @@ namespace QualityOfTerraria.Networking
             _loggedWorldNotReady = false;
             _clientMapScanTick = ulong.MaxValue;
             ClientPylons.Clear();
+            ServerPylons.Clear();
             ClientMapPylons.Clear();
             Main.refreshMap = true;
         }
@@ -82,6 +84,7 @@ namespace QualityOfTerraria.Networking
             _loggedWorldNotReady = false;
             _clientMapScanTick = ulong.MaxValue;
             ClientPylons.Clear();
+            ServerPylons.Clear();
             ClientMapPylons.Clear();
         }
 
@@ -112,6 +115,7 @@ namespace QualityOfTerraria.Networking
             _loggedWorldNotReady = false;
             _clientMapScanTick = ulong.MaxValue;
             ClientPylons.Clear();
+            ServerPylons.Clear();
             ClientMapPylons.Clear();
             Main.refreshMap = true;
             Mod.LogInfo($"晶塔同步网络模式从 {previousMode} 切换到 {Main.netMode}，重新获取服务器列表。");
@@ -134,6 +138,47 @@ namespace QualityOfTerraria.Networking
                 index++;
             }
             return index == left.Count;
+        }
+
+        internal static bool ApplyServerSnapshot(List<TeleportPylonInfo> destination, IEnumerable<TeleportPylonInfo> snapshot)
+        {
+            if (destination == null || snapshot == null) return false;
+            bool changed = false;
+            foreach (TeleportPylonInfo pylon in snapshot)
+            {
+                int index = destination.FindIndex(existing => existing.PositionInTiles.Equals(pylon.PositionInTiles));
+                if (index >= 0)
+                {
+                    if (destination[index].Equals(pylon)) continue;
+                    destination[index] = pylon;
+                }
+                else destination.Add(pylon);
+                changed = true;
+            }
+            return changed;
+        }
+
+        internal static void ApplyServerPylonAdded(TETeleportationPylon pylon)
+        {
+            if (Main.netMode != 2 || pylon == null) return;
+            TeleportPylonType type;
+            if (!pylon.TryGetPylonType(out type)) return;
+            ApplyServerSnapshot(ServerPylons, new[]
+            {
+                new TeleportPylonInfo { PositionInTiles = pylon.Position, TypeOfPylon = type }
+            });
+        }
+
+        internal static void ApplyServerPylonRemoved(TETeleportationPylon pylon)
+        {
+            if (Main.netMode != 2 || pylon == null) return;
+            ServerPylons.RemoveAll(existing => existing.PositionInTiles.Equals(pylon.Position));
+        }
+
+        internal static void EnsureServerPylonsInVanillaList()
+        {
+            if (Main.netMode != 2 || Main.PylonSystem == null || ServerPylons.Count == 0) return;
+            MergeClientPylons(Main.PylonSystem.Pylons, ServerPylons);
         }
 
         internal static List<TeleportPylonInfo> BeginMapDraw()
@@ -241,7 +286,11 @@ namespace QualityOfTerraria.Networking
                 return pylons;
             }
             pylons = CollectAuthoritativePylons();
-            if (pylons.Count > 0) return pylons;
+            if (pylons.Count > 0)
+            {
+                ApplyServerSnapshot(ServerPylons, pylons);
+                return new List<TeleportPylonInfo>(ServerPylons);
+            }
             if (Main.tile == null)
             {
                 Mod.LogInfo("晶塔快照为空：原版列表为空且世界图块尚未加载。");
@@ -251,9 +300,10 @@ namespace QualityOfTerraria.Networking
             int activePylonTiles, parsedPylonFrames;
             List<TeleportPylonInfo> recovered = CollectWorldPylons(out activePylonTiles, out parsedPylonFrames);
             foreach (TeleportPylonInfo pylon in recovered) Main.PylonSystem.AddForClient(pylon);
+            bool changed = ApplyServerSnapshot(ServerPylons, recovered);
             string worldName = Main.ActiveWorldFileData == null ? "unknown" : Main.ActiveWorldFileData.Name;
-            Mod.LogInfo($"晶塔回退扫描：世界={worldName}，地图={Main.maxTilesX}x{Main.maxTilesY}，活动晶塔图块={activePylonTiles}，有效帧={parsedPylonFrames}，恢复={recovered.Count}。");
-            return recovered;
+            Mod.LogInfo($"晶塔回退扫描：世界={worldName}，地图={Main.maxTilesX}x{Main.maxTilesY}，活动晶塔图块={activePylonTiles}，有效帧={parsedPylonFrames}，本次={recovered.Count}，缓存={ServerPylons.Count}，变更={changed}。");
+            return new List<TeleportPylonInfo>(ServerPylons);
         }
 
         internal static bool TryGetPylonInfo(int x, int y, bool active, int tileType, int frameX, int frameY, out TeleportPylonInfo pylon)
