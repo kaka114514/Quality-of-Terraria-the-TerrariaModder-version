@@ -20,6 +20,7 @@ namespace QualityOfTerraria.Networking
         private static int _sessionNetMode = -1;
         private static ulong _lastRequest;
         private static bool _hasRequestedSnapshot;
+        private static bool _serverTilesScanned;
         private static bool _loggedWorldNotReady;
         private static ulong _serverSessionStartTick;
         private static ulong _clientMapScanTick = ulong.MaxValue;
@@ -41,12 +42,16 @@ namespace QualityOfTerraria.Networking
             _requestHandler = (client, operation, payload) =>
             {
                 if (operation != Operation || Main.netMode != 2) return;
-                NetworkRuntime.Enqueue(() => SendServerList(client, payload));
+                string complete;
+                if (!NetSyncPayload.TryAcceptRequest(client, operation, payload, out complete)) return;
+                NetworkRuntime.Enqueue(() => SendServerList(client, complete));
             };
             _responseHandler = (success, operation, payload) =>
             {
                 if (operation != Operation || Main.netMode != 1) return;
-                NetworkRuntime.Enqueue(() => ReceiveClientList(success, payload));
+                string complete;
+                if (!NetSyncPayload.TryAcceptResponse(operation, payload, out complete)) return;
+                NetworkRuntime.Enqueue(() => ReceiveClientList(success, complete));
             };
             NetSync.OnStorageRequest += _requestHandler;
             NetSync.OnStorageResponse += _responseHandler;
@@ -60,6 +65,7 @@ namespace QualityOfTerraria.Networking
             _ready = Main.netMode != 1;
             _lastRequest = 0;
             _hasRequestedSnapshot = false;
+            _serverTilesScanned = false;
             _loggedWorldNotReady = false;
             _clientMapScanTick = ulong.MaxValue;
             ClientPylons.Clear();
@@ -80,6 +86,7 @@ namespace QualityOfTerraria.Networking
             _ready = false;
             _lastRequest = 0;
             _hasRequestedSnapshot = false;
+            _serverTilesScanned = false;
             _serverSessionStartTick = 0;
             _loggedWorldNotReady = false;
             _clientMapScanTick = ulong.MaxValue;
@@ -112,6 +119,7 @@ namespace QualityOfTerraria.Networking
             _ready = Main.netMode != 1;
             _lastRequest = 0;
             _hasRequestedSnapshot = false;
+            _serverTilesScanned = false;
             _loggedWorldNotReady = false;
             _clientMapScanTick = ulong.MaxValue;
             ClientPylons.Clear();
@@ -240,6 +248,7 @@ namespace QualityOfTerraria.Networking
         internal static void ApplyClientPylonRemoved(TeleportPylonInfo pylon)
         {
             if (Main.netMode != 1) return;
+            if (HasCompletePylon(pylon)) return;
             ClientPylons.RemoveAll(existing => existing.PositionInTiles.Equals(pylon.PositionInTiles));
             Main.refreshMap = true;
         }
@@ -252,8 +261,9 @@ namespace QualityOfTerraria.Networking
         internal static void RefreshServerPylonsImmediately()
         {
             if (Main.netMode != 2 || Main.PylonSystem == null) return;
-            Main.PylonSystem.RequestImmediateUpdate();
-            string payload = EncodePylons(RefreshServerPylons());
+            // OnPlaced/OnRemoved 已经刷新原版列表；拆除期间不扫描尚未清除的图块。
+            ApplyServerSnapshot(ServerPylons, CollectAuthoritativePylons());
+            string payload = EncodePylons(ServerPylons);
             for (int client = 0; client < Main.maxPlayers; client++)
                 if (Main.player[client].active) NetSyncPayload.SendResponseTo(client, true, Operation, payload);
         }
@@ -286,8 +296,9 @@ namespace QualityOfTerraria.Networking
                 return pylons;
             }
             pylons = CollectAuthoritativePylons();
-            if (pylons.Count > 0)
+            if (_serverTilesScanned)
             {
+                ServerPylons.RemoveAll(pylon => !HasCompletePylon(pylon));
                 ApplyServerSnapshot(ServerPylons, pylons);
                 return new List<TeleportPylonInfo>(ServerPylons);
             }
@@ -299,7 +310,15 @@ namespace QualityOfTerraria.Networking
 
             int activePylonTiles, parsedPylonFrames;
             List<TeleportPylonInfo> recovered = CollectWorldPylons(out activePylonTiles, out parsedPylonFrames);
-            foreach (TeleportPylonInfo pylon in recovered) Main.PylonSystem.AddForClient(pylon);
+            _serverTilesScanned = true;
+            foreach (TeleportPylonInfo pylon in recovered)
+            {
+                if (!HasCompletePylon(pylon) || TileEntity.ByPosition.ContainsKey(pylon.PositionInTiles)) continue;
+                // 恢复原版实体，避免下一次原版列表重建再次发送移除通知。
+                int id = TETeleportationPylon.Place(pylon.PositionInTiles.X, pylon.PositionInTiles.Y);
+                NetMessage.SendData(86, -1, -1, null, id, pylon.PositionInTiles.X, pylon.PositionInTiles.Y);
+            }
+            ApplyServerSnapshot(ServerPylons, pylons);
             bool changed = ApplyServerSnapshot(ServerPylons, recovered);
             string worldName = Main.ActiveWorldFileData == null ? "unknown" : Main.ActiveWorldFileData.Name;
             Mod.LogInfo($"晶塔回退扫描：世界={worldName}，地图={Main.maxTilesX}x{Main.maxTilesY}，活动晶塔图块={activePylonTiles}，有效帧={parsedPylonFrames}，本次={recovered.Count}，缓存={ServerPylons.Count}，变更={changed}。");
@@ -319,20 +338,19 @@ namespace QualityOfTerraria.Networking
             return true;
         }
 
-        internal static bool TryFindPylonAround(int x, int y, out TeleportPylonInfo pylon)
+        internal static bool HasCompletePylon(TeleportPylonInfo pylon)
         {
-            pylon = default(TeleportPylonInfo);
-            if (Main.tile == null) return false;
-            int minX = Math.Max(0, x - 2), maxX = Math.Min(Main.maxTilesX - 1, x + 2);
-            int minY = Math.Max(0, y - 3), maxY = Math.Min(Main.maxTilesY - 1, y + 3);
-            for (int tileX = minX; tileX <= maxX; tileX++)
-            for (int tileY = minY; tileY <= maxY; tileY++)
+            int x = pylon.PositionInTiles.X, y = pylon.PositionInTiles.Y;
+            if (Main.tile == null || x < 0 || y < 0 || x + 2 >= Main.maxTilesX || y + 3 >= Main.maxTilesY) return false;
+            for (int dx = 0; dx < 3; dx++)
+            for (int dy = 0; dy < 4; dy++)
             {
-                Tile tile = Main.tile[tileX, tileY];
-                if (tile == null || !tile.active() || tile.type != 597) continue;
-                if (TryGetPylonInfo(tileX, tileY, true, tile.type, tile.frameX, tile.frameY, out pylon)) return true;
+                Tile tile = Main.tile[x + dx, y + dy];
+                TeleportPylonInfo actual;
+                if (tile == null || !TryGetPylonInfo(x + dx, y + dy, tile.active(), tile.type, tile.frameX, tile.frameY, out actual)
+                    || !actual.Equals(pylon)) return false;
             }
-            return false;
+            return true;
         }
 
         internal static bool TryGetPlacedPylonInfo(int x, int y, int style, out TeleportPylonInfo pylon)
@@ -361,7 +379,7 @@ namespace QualityOfTerraria.Networking
                 TeleportPylonInfo pylon;
                 if (!TryGetPylonInfo(x, y, true, tile.type, tile.frameX, tile.frameY, out pylon)) continue;
                 parsedPylonFrames++;
-                if (!pylons.Contains(pylon)) pylons.Add(pylon);
+                if (!pylons.Contains(pylon) && HasCompletePylon(pylon)) pylons.Add(pylon);
             }
             return pylons;
         }

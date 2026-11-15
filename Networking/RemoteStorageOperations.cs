@@ -88,7 +88,12 @@ namespace QualityOfTerraria.Networking
         internal static bool CanForceUnlock => Main.netMode == 1 && StorageTransactionJournal.ClientLocked;
         internal static bool Ready => !string.IsNullOrEmpty(_token);
         internal static string WorldIdentity => Main.netMode == 2 ? ServerMarkedChests.WorldIdentity : _world;
-        internal static string Status { get; private set; } = "等待服务器确认标记箱子";
+        private static string _status = "等待服务器确认标记箱子";
+        internal static string Status
+        {
+            get => StorageTransactionJournal.SaveRetryPending ? StorageTransactionJournal.Status : _status;
+            private set => _status = value;
+        }
 
         internal static void Initialize()
         {
@@ -387,6 +392,11 @@ namespace QualityOfTerraria.Networking
 
         internal static bool RetryPendingOperation()
         {
+            if (StorageTransactionJournal.RetryClientSave())
+            {
+                Status = StorageTransactionJournal.Status;
+                return true;
+            }
             if (Main.netMode != 1 || !Ready)
             {
                 Status = "服务器连接尚未准备好，暂时不能重试核验";

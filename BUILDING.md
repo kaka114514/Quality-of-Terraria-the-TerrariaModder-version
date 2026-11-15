@@ -13,9 +13,13 @@
 
 ## 回归检查
 
+晶塔与设置同步回归：构建客户端和专服后，分别运行 `pwsh -File tests/PortableStorage.Tests.ps1 -PylonOnly`、`pwsh -File tests/PortableStorage.Tests.ps1 -SyncOnly` 和 `pwsh -File tests/MultiplayerSettings.Server.Tests.ps1`。覆盖缺失晶塔实体恢复、原版重复刷新、实际移除、邻格挖掘、长列表分片，以及设置申请、同意、保存、反馈和登记重试；网络发送由测试捕获，真实双客户端联机仍需游戏内验证。
+
 熔岩自动钓鱼回归：构建客户端后运行 `pwsh -NoProfile -File tests/Autofisher.Lava.Tests.ps1`。测试使用真实游戏的钓鱼掉落表、液体检测、装备效果、上钩、鱼饵消耗与收杆方法，覆盖单机及联机客户端状态下的熔岩许可组合、未上钩的等待进度、水和蜂蜜；物品交付与装饰鱼显示由测试捕获，不代替游戏内联机实测。
 
 原版保存后鼠标记录兼容：`pwsh -NoProfile -File tests/CursorJournal.VanillaSave.Tests.ps1`。测试在 `bin/cursor-journal-tests/` 创建角色，调用原版保存／加载验证过期鼠标记录恢复、当前物品数量不变、记录备份、下一次进入，以及库存不一致、损坏文件和未知交易仍保持保护；不读写实际玩家存档。
+
+该测试也验证后台保存请求回到主线程后执行、原版 IO 锁占用时延后保存且不误核验、临时写入失败后的自动与手动恢复、保存异常后文件锁释放、退出时最终保存、已确认交易随角色保存清除，以及旧会话的排队保存不会带入新会话。另以 30 轮保存与背包变化交错检查重复执行。文件序列化使用真实原版方法，外层成就与地图保存由测试替代；游戏内自动保存耗时、Steam 云存档及双客户端长时间运行仍需实测。
 
 本轮快捷收纳、标记箱效果、倍率设置与世界控制回归：构建客户端后执行 `pwsh -NoProfile -File tests/PortableStorage.Tests.ps1`，再执行 `pwsh -NoProfile -File tests/RemoteStorage.NonHost.Tests.ps1`。前者使用真实 Terraria/Core/生产程序集验证窗口保活、药水阈值、远程制作站、信息配件、原版服务器扣料、配置迁移、时间边界及房主权限；捕获网络和音效，不代替真实绘制、输入法及双客户端验收。
 

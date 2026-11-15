@@ -13,7 +13,7 @@ namespace QualityOfTerraria.Networking
     internal static class SettingsSync
     {
         private const string Prefix = "qot.settings.";
-        private const string Version = "1.2.7";
+        private const string Version = "1.2.8";
         private const int MaxRequests = 16;
         private static string _clientNonce, _room;
         private static int _lifecycle, _helloFrames;
@@ -85,7 +85,7 @@ namespace QualityOfTerraria.Networking
         internal static void Update()
         {
             if (!Mod.WorldActive) return;
-            if (Main.netMode == 1 && _room == null && ++_helloFrames >= 180) { _helloFrames = 0; Hello(); }
+            if (Main.netMode == 1 && ++_helloFrames >= (_room == null ? 180 : 600)) { _helloFrames = 0; Hello(); }
             if (Main.netMode == 1 && _room != null) SendPersonalChanges();
             if (Main.netMode == 2)
             {
@@ -258,7 +258,10 @@ namespace QualityOfTerraria.Networking
                         if (string.IsNullOrEmpty(identity)) { Reject(slot, "玩家身份尚未就绪"); return; }
                         Peer old;
                         if (!Peers.TryGetValue(slot, out old) || old.Identity != identity || old.Nonce != nonce)
+                        {
                             Peers[slot] = new Peer { Identity = identity, Nonce = nonce, Connection = Guid.NewGuid().ToString("N"), Personal = personal };
+                            Mod.LogInfo($"设置服务已登记玩家 {slot}：{Main.player[slot].name}。");
+                        }
                         else old.Personal = personal;
                         Send(slot, "hello", null);
                         return;
@@ -309,6 +312,7 @@ namespace QualityOfTerraria.Networking
                     proposal.Targets.Add(new Target { Slot = pair.Key, Connection = pair.Value.Connection, Name = Main.player[pair.Key].name });
             if (proposal.Targets.Count == 0) { Reject(slot, "没有已连接同版本设置服务的其他玩家"); return; }
             Proposals.Add(proposal.Id, proposal);
+            Mod.LogInfo($"设置同步申请：玩家 {slot} 向 {proposal.Targets.Count} 名玩家发送申请。");
             foreach (var target in proposal.Targets)
             {
                 Send(target.Slot, "offer", w => { w.Write(proposal.Id); w.Write(proposal.Name); WriteSnapshot(w, snapshot); });
@@ -330,7 +334,8 @@ namespace QualityOfTerraria.Networking
             if (world.Length == 0) return "无世界项";
             if (proposal.WorldApplied) return "世界项已由管理员同意并应用";
             string names = string.Join("、", world.Select(p => p.Label));
-            if (!PermissionService.IsAdmin(acceptingSlot)) return "未应用世界项（需要房主/管理员同意）：" + names;
+            if (!PermissionService.IsAdmin(proposal.Source) && !PermissionService.IsAdmin(acceptingSlot))
+                return "未应用世界项（需要房主/管理员发起或同意）：" + names;
             if (ConfigManager.GetCurrentScope() != ConfigScope.Server) return "未应用世界项（Core 当前进程无法保存服务器配置）：" + names;
             var previous = world.ToDictionary(p => p.Key, p => p.GetValue(Mod.Config));
             try
@@ -361,7 +366,12 @@ namespace QualityOfTerraria.Networking
                     if (operation == Prefix + "hello")
                     {
                         End(reader); if (!Nonce(room)) return;
-                        _room = room; Status = "设置服务已连接，可发送同步申请"; return;
+                        if (_room != room)
+                        {
+                            Rows.Clear(); Applying.Clear(); _lastPersonal = null;
+                            Status = "设置服务已连接，可发送同步申请";
+                        }
+                        _room = room; return;
                     }
                     if (_room == null || room != _room) return;
                     if (operation == Prefix + "error") { Status = reader.ReadString(); End(reader); return; }
@@ -374,6 +384,7 @@ namespace QualityOfTerraria.Networking
                         if (!ValidateSnapshot(snapshot, out error)) { Status = error; return; }
                         if (Rows.Any(r => r.Id == id && r.Incoming)) return;
                         AddRow(new RequestRow { Id = id, Name = name, State = "等待同意", Incoming = true, Pending = true, Expires = DateTime.UtcNow.AddMinutes(2) });
+                        Mod.LogInfo("收到设置同步申请：" + name);
                         Main.NewText(name + " 申请同步设置，请在更好的体验设置中同意或拒绝", 255, 220, 100);
                     }
                     else if (operation == Prefix + "apply")
@@ -384,6 +395,7 @@ namespace QualityOfTerraria.Networking
                         var row = Rows.FirstOrDefault(r => r.Id == id && r.Incoming && !r.Pending && r.State == "已同意，等待服务器核验");
                         if (row == null) { Applying.Remove(id); return; }
                         string result = ApplyPersonal(snapshot) + "；" + worldResult;
+                        Mod.LogInfo("设置同步应用结果：" + result);
                         row.State = result; Status = result;
                         NetSyncPayload.SendRequest(Prefix + "applied", Write(w => { Header(w); w.Write(id); w.Write(result.Length > 500 ? result.Substring(0, 500) : result); }));
                     }
@@ -502,7 +514,11 @@ namespace QualityOfTerraria.Networking
             return Active(slot) && Peers.TryGetValue(slot, out peer) && peer.Connection == connection && peer.Identity == PermissionService.GetGuid(slot);
         }
         private static bool Nonce(string value) => value != null && value.Length == 32 && value.All(c => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
-        private static void Reject(int slot, string reason) { if (Peers.ContainsKey(slot)) Send(slot, "error", w => w.Write(reason), false); }
+        private static void Reject(int slot, string reason)
+        {
+            Mod.LogInfo($"设置同步拒绝玩家 {slot} 的请求：{reason}");
+            if (Peers.ContainsKey(slot)) Send(slot, "error", w => w.Write(reason), false);
+        }
         private static void Send(int slot, string operation, Action<BinaryWriter> body, bool ok = true)
         {
             Peer peer;

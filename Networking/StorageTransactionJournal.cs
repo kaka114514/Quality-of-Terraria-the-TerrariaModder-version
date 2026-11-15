@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
+using System.Threading;
 using HarmonyLib;
 using Terraria;
 using Terraria.IO;
@@ -32,9 +33,20 @@ namespace QualityOfTerraria.Networking
             internal bool Favorite;
         }
 
+        private sealed class ClientSaveRequest
+        {
+            internal PlayerFileData File;
+            internal bool SkipMapSave;
+        }
+
         private static readonly Dictionary<string, ServerRecords> Worlds = new Dictionary<string, ServerRecords>();
         private static string _character, _path, _serverWorld, _characterPath;
         private static bool _canSave, _saving, _characterCloud;
+        private static int _clientThreadId;
+        private static readonly object PlayerIOLock = AccessTools.Field(typeof(Player), "IOLock").GetValue(null);
+        private static ClientSaveRequest _queuedSave;
+        private static bool _retrySave;
+        private static ulong _nextSaveRetry;
         // 角色整份保存（写入角色文件 + 读回校验 + 鼠标记录）是联机每次存取的主要卡顿来源，
         // 短时间内连续操作合并成一次；事务记录保留到角色真正落盘后再清除。
         private const int SaveCoalesceMs = 4000;
@@ -43,11 +55,15 @@ namespace QualityOfTerraria.Networking
         private static int _opsSinceSave;
         internal static ClientRecord Pending { get; private set; }
         internal static bool ClientLocked => _character != null && (!_canSave || (Pending != null && !Pending.Confirmed));
+        internal static bool SaveRetryPending => _retrySave;
         internal static string Status { get; private set; } = "";
 
         internal static void InitializeClient(string characterIdentity)
         {
             _character = characterIdentity; Pending = null; _canSave = false;
+            _clientThreadId = Thread.CurrentThread.ManagedThreadId;
+            Interlocked.Exchange(ref _queuedSave, null);
+            _retrySave = false; _nextSaveRetry = 0;
             _characterPath = Main.ActivePlayerFileData?.Path;
             _characterCloud = Main.ActivePlayerFileData?.IsCloudSave == true;
             if (string.IsNullOrEmpty(characterIdentity)) { Status = "无法确认角色身份，未发送物品操作"; return; }
@@ -177,6 +193,8 @@ namespace QualityOfTerraria.Networking
                     if (File.Exists(cursor)) File.Delete(cursor);
                 Pending = null;
                 _canSave = true;
+                _retrySave = false; _nextSaveRetry = 0;
+                Interlocked.Exchange(ref _queuedSave, null);
                 _lastSaveTick = 0;
                 _opsSinceSave = 0;
                 Status = "已备份并手动解除库存锁；旧操作结果未确认，请检查物品数量";
@@ -366,11 +384,41 @@ namespace QualityOfTerraria.Networking
         [HarmonyPatch(typeof(Player), nameof(Player.SavePlayer), typeof(PlayerFileData), typeof(bool), typeof(bool))]
         internal static class PendingSavePatch
         {
-            public static bool Prefix(PlayerFileData __0)
-                => Main.netMode == 2 || !MatchesCharacter(__0) || _saving || !ClientLocked;
-            public static void Postfix(PlayerFileData __0)
+            public static bool Prefix(PlayerFileData __0, bool __1, bool __2, out bool __state)
             {
-                if (_saving || _path == null || !_canSave || Main.netMode == 2 || !MatchesCharacter(__0)) return;
+                __state = false;
+                if (Main.netMode == 2 || _path == null || !MatchesCharacter(__0)) return true;
+                if (!_saving && ClientLocked && !_retrySave) return false;
+                // 原版自动保存在工作线程运行；活背包的保存和核验必须在同一主线程完成。
+                bool playing = Mod.WorldActive && !Main.gameMenu;
+                if (playing && Thread.CurrentThread.ManagedThreadId != _clientThreadId)
+                {
+                    QueueClientSave(__0, __1);
+                    return false;
+                }
+                if (!Monitor.TryEnter(PlayerIOLock))
+                {
+                    // 退出时的最终保存没有下一帧可等待，保留原版不可跳过保存的行为。
+                    if (!playing && !__2) Monitor.Enter(PlayerIOLock);
+                    else { QueueClientSave(__0, __1); return false; }
+                }
+                __state = true;
+                return true;
+            }
+
+            public static Exception Finalizer(PlayerFileData __0, Exception __exception, bool __state)
+            {
+                if (__state)
+                {
+                    try { if (__exception != null && !_saving) RetryFailedSave(__0, __exception); }
+                    finally { Monitor.Exit(PlayerIOLock); }
+                }
+                return __exception;
+            }
+
+            public static void Postfix(PlayerFileData __0, bool __runOriginal)
+            {
+                if (!__runOriginal || _saving || _path == null || (!_canSave && !_retrySave) || Main.netMode == 2 || !MatchesCharacter(__0)) return;
                 try
                 {
                     if (Pending != null)
@@ -380,13 +428,47 @@ namespace QualityOfTerraria.Networking
                         SaveCursor(__0);
                         StoragePersistence.WriteInPlace(_path, writer => { writer.Write(2); writer.Write(false); });
                         Pending = null; _lastSaveTick = Environment.TickCount; _opsSinceSave = 0;
+                        _canSave = true; _retrySave = false; _nextSaveRetry = 0;
                         Status = "确认库存和鼠标物品已保存";
                         return;
                     }
                     SaveCursor(__0);
+                    _canSave = true; _retrySave = false; _nextSaveRetry = 0;
+                    Status = "角色和鼠标物品已核验保存";
                 }
-                catch (Exception error) { _canSave = false; Status = "角色与鼠标物品未能共同保存；保留记录并锁定库存"; Mod.LogError(Status, error); }
+                catch (Exception error) { RetryFailedSave(__0, error); }
             }
+        }
+
+        private static void QueueClientSave(PlayerFileData file, bool skipMapSave)
+            => Interlocked.CompareExchange(ref _queuedSave, new ClientSaveRequest { File = file, SkipMapSave = skipMapSave }, null);
+
+        private static void RetryFailedSave(PlayerFileData file, Exception error)
+        {
+            bool firstFailure = !_retrySave;
+            _canSave = false; _retrySave = true;
+            _nextSaveRetry = Main.GameUpdateCount + 180;
+            QueueClientSave(file, true);
+            Status = "角色与鼠标物品保存核验失败，保留记录并等待重新保存核验";
+            if (firstFailure) Mod.LogError(Status, error);
+        }
+
+        internal static void UpdateClient()
+        {
+            if (!Mod.WorldActive || Main.netMode == 2 || Thread.CurrentThread.ManagedThreadId != _clientThreadId ||
+                (!_canSave && !_retrySave) || (Pending != null && !Pending.Confirmed) || Main.GameUpdateCount < _nextSaveRetry) return;
+            ClientSaveRequest request = Interlocked.Exchange(ref _queuedSave, null);
+            if (request == null || !MatchesCharacter(request.File)) return;
+            try { Player.SavePlayer(request.File, request.SkipMapSave, true); }
+            catch (Exception error) { RetryFailedSave(request.File, error); }
+        }
+
+        internal static bool RetryClientSave()
+        {
+            if (!_retrySave || (Pending != null && !Pending.Confirmed)) return false;
+            _nextSaveRetry = 0;
+            UpdateClient();
+            return true;
         }
 
         internal static void InitializeServer(string world)

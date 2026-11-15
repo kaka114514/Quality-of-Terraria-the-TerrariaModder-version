@@ -253,6 +253,7 @@ namespace QualityOfTerraria
             if (!WorldActive) return;
             VersionUpdateService.Update();
             NetworkRuntime.Update();
+            StorageTransactionJournal.UpdateClient();
             WandsAndTools.UpdatePlacementJobs();
             RemoteStorageOperations.Update();
             PylonSync.Update();

@@ -148,8 +148,11 @@ namespace QualityOfTerraria.Patches
             {
                 __state = null;
                 if (Main.netMode != 1) return;
+                if (Main.tile == null || i < 0 || j < 0 || i >= Main.maxTilesX || j >= Main.maxTilesY) return;
+                Tile tile = Main.tile[i, j];
+                if (tile == null) return;
                 TeleportPylonInfo info;
-                if (Networking.PylonSync.TryFindPylonAround(i, j, out info)) __state = info;
+                if (Networking.PylonSync.TryGetPylonInfo(i, j, tile.active(), tile.type, tile.frameX, tile.frameY, out info)) __state = info;
             }
 
             public static void Postfix(TeleportPylonInfo? __state)
