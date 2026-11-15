@@ -11,6 +11,8 @@
 
 `build.ps1` 会先构建两种运行模块再部署；使用前请修改其中的目标游戏路径。单独运行 `dotnet build .\QualityOfTerraria.csproj -c Release` 只构建客户端，完整发布还需运行 `build-server.ps1`。构建不会自动推送或发布。联机发布包需要房主／专用服务器和所有玩家安装同版本；专用服务器目录还需包含 `QualityOfTerraria.Server.bin`，本版 manifest 的 `multiplayer` 为 `required`。
 
+发布时 GitHub Release 使用客户端 DLL、服务器模块、manifest、README、UPDATE_LOG 和版本 ZIP 六项标准附件。推送更新后的下载副本只把最终 ZIP 直接放到 `E:\Download\Chrome Download` 根目录，不创建版本文件夹，也不复制散装模块、文档或图标。
+
 ## 回归检查
 
 晶塔与设置同步回归：构建客户端和专服后，分别运行 `pwsh -File tests/PortableStorage.Tests.ps1 -PylonOnly`、`pwsh -File tests/PortableStorage.Tests.ps1 -SyncOnly` 和 `pwsh -File tests/MultiplayerSettings.Server.Tests.ps1`。覆盖客户端放置预测、旧 0 快照覆盖、本地拆除后旧名单回显、同一坐标再放置、客户端坐标通知、服务器图块核验、原版事件漏报、失败挖掘保护、实体恢复和长列表分片，以及设置申请、同意、保存、反馈和登记重试；网络发送由测试捕获，真实双客户端联机仍需游戏内验证。
