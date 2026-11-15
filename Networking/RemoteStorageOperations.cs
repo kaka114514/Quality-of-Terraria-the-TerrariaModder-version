@@ -541,6 +541,7 @@ namespace QualityOfTerraria.Networking
             Player player = Main.LocalPlayer;
             if (player == null || player.chest < 0 || player.chest >= Main.maxChests || Main.chest == null || Main.chest[player.chest] == null)
                 return false;
+            if (Mod.Config?.AutoMarkOpenedChests != true) return false;
             Chest chest = Main.chest[player.chest];
             if (ExtremeStorageUI.IsChestMarked(chest)) return false;
             if (Main.netMode == 1 && (!Ready || _markPending != null)) return false;

@@ -137,7 +137,7 @@ namespace QualityOfTerraria.Patches
                 if (Main.netMode != 1 || type != 597) return;
                 TeleportPylonInfo info;
                 if (Networking.PylonSync.TryGetPlacedPylonInfo(x, y, style, out info))
-                    Networking.PylonSync.ApplyClientPylonAdded(info);
+                    Networking.PylonSync.ApplyClientPylonAddedPrediction(info);
             }
         }
 
@@ -155,10 +155,10 @@ namespace QualityOfTerraria.Patches
                 if (Networking.PylonSync.TryGetPylonInfo(i, j, tile.active(), tile.type, tile.frameX, tile.frameY, out info)) __state = info;
             }
 
-            public static void Postfix(TeleportPylonInfo? __state)
+            public static void Postfix(int i, int j, TeleportPylonInfo? __state)
             {
-                if (Main.netMode == 1 && __state.HasValue)
-                    Networking.PylonSync.ApplyClientPylonRemoved(__state.Value);
+                if (Main.netMode == 1 && __state.HasValue && !Networking.PylonSync.HasCompletePylon(__state.Value))
+                    Networking.PylonSync.ApplyClientPylonRemovedPrediction(__state.Value);
             }
         }
 

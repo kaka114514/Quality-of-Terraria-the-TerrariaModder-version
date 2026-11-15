@@ -42,7 +42,7 @@ namespace QualityOfTerraria
                     }
                     catch (Exception exception) { VeinImportStateError = exception.Message; }
                 }
-                return 6;
+                return 7;
             }
         }
 
@@ -163,6 +163,11 @@ namespace QualityOfTerraria
         [Label("金币自动存入猪猪钱罐")]
         [Description("拾取的金币自动转移至猪猪钱罐中，防止意外掉落。")]
         public bool AutoSaveCoins { get; set; } = false;
+
+        [Client]
+        [Label("打开箱子时自动标记")]
+        [Description("开启后，打开普通箱子时会自动加入终极存储；关闭后仍可在终极存储的箱子管理页手动标记。")]
+        public bool AutoMarkOpenedChests { get; set; } = true;
 
         [Client]
         [Label("无限弹药")]

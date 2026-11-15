@@ -26,6 +26,7 @@ namespace QualityOfTerraria.Patches
                 if (__instance.whoAmI != Main.myPlayer)
                     return;
 
+                bool deposited = false;
                 // 检查背包里的钱币格子 50..53
                 for (int slot = 50; slot <= 53; slot++)
                 {
@@ -42,6 +43,7 @@ namespace QualityOfTerraria.Patches
                                 int toAdd = coin.stack < canAdd ? coin.stack : canAdd;
                                 bankItem.stack += toAdd;
                                 coin.stack -= toAdd;
+                                deposited |= toAdd > 0;
                                 if (coin.stack <= 0)
                                 {
                                     coin.TurnToAir();
@@ -60,13 +62,52 @@ namespace QualityOfTerraria.Patches
                                 {
                                     __instance.bank.item[b] = coin.Clone();
                                     coin.TurnToAir();
+                                    deposited = true;
                                     break;
                                 }
                             }
                         }
                     }
                 }
+                if (deposited) CompactCoinStacks(__instance.bank.item);
             }
+        }
+
+        internal static void CompactCoinStacks(Item[] items)
+        {
+            if (items == null) return;
+            for (int type = ItemID.CopperCoin; type <= ItemID.PlatinumCoin; type++)
+            {
+                int targetSlot = -1;
+                for (int slot = 0; slot < items.Length; slot++)
+                {
+                    Item item = items[slot];
+                    if (item == null || item.IsAir || item.type != type) continue;
+                    if (targetSlot < 0 || targetSlot >= items.Length || items[targetSlot] == null ||
+                        items[targetSlot].IsAir || items[targetSlot].type != type || items[targetSlot].stack >= items[targetSlot].maxStack)
+                    {
+                        targetSlot = slot;
+                        continue;
+                    }
+
+                    Item target = items[targetSlot];
+                    int moved = Math.Min(item.stack, target.maxStack - target.stack);
+                    target.stack += moved;
+                    item.stack -= moved;
+                    if (item.stack <= 0) item.TurnToAir();
+                }
+            }
+        }
+
+        internal static bool ShouldAutoMarkOpenedChest(int playerIndex)
+        {
+            if (Main.netMode == 2)
+            {
+                QualityOfTerrariaConfig synced = Networking.SettingsSync.GetPlayerConfig(playerIndex);
+                if (synced != null) return synced.AutoMarkOpenedChests;
+                return playerIndex == Main.myPlayer && Mod.Config?.AutoMarkOpenedChests == true;
+            }
+            return Mod.Config?.AutoMarkOpenedChests == true;
         }
 
         // 2. 磁铁般的物品抓取范围
@@ -102,7 +143,8 @@ namespace QualityOfTerraria.Patches
 
                 int previousChest;
                 _lastAutoMarkedChest.TryGetValue(__instance.whoAmI, out previousChest);
-                if (__instance.chest >= 0 && __instance.chest != previousChest && __instance.chest < Main.maxChests && Main.chest != null && Main.chest[__instance.chest] != null)
+                if (__instance.chest >= 0 && __instance.chest != previousChest && __instance.chest < Main.maxChests &&
+                    Main.chest != null && Main.chest[__instance.chest] != null && ShouldAutoMarkOpenedChest(__instance.whoAmI))
                 {
                     if (Main.netMode == 2)
                     {
@@ -181,6 +223,7 @@ namespace QualityOfTerraria.Patches
                 if (!Mod.WorldActive || __instance == null || __instance.whoAmI != Main.myPlayer || sItem == null ||
                     sItem.axe <= 0 || !Features.ToolSpeedSystem.SpeedActive)
                     return;
+                if (__instance.itemTime <= 0) return;
 
                 var config = Networking.SettingsSync.GetPlayerConfig(__instance.whoAmI);
                 if (config == null) return;

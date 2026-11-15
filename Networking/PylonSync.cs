@@ -14,8 +14,20 @@ namespace QualityOfTerraria.Networking
         private const string Operation = "quality-of-terraria.pylons.v1";
         private const ulong SnapshotRequestInterval = 30;
         private const ulong SnapshotRefreshInterval = 120;
+        private const ulong PylonPlacementGrace = 60;
+        private const ulong PylonRemovalConfirmationDelay = 30;
+        private const ulong ClientPredictionValidationDelay = 120;
+        private const ulong ClientRemovalGrace = 120;
+        private const ulong ClientReconcileTimeout = 300;
         private static readonly List<TeleportPylonInfo> ClientPylons = new List<TeleportPylonInfo>();
         private static readonly List<TeleportPylonInfo> ServerPylons = new List<TeleportPylonInfo>();
+        private static readonly Dictionary<Point16, ulong> ServerPylonAddedAt = new Dictionary<Point16, ulong>();
+        private static readonly Dictionary<Point16, ulong> PendingServerPylonRemovals = new Dictionary<Point16, ulong>();
+        private static readonly Dictionary<Point16, ulong> ClientPredictedAt = new Dictionary<Point16, ulong>();
+        private static readonly Dictionary<Point16, TeleportPylonInfo> ClientPredictedPylons = new Dictionary<Point16, TeleportPylonInfo>();
+        private static readonly Dictionary<Point16, ulong> ClientRemovedAt = new Dictionary<Point16, ulong>();
+        private static readonly Dictionary<Point16, PendingClientPylonChange> PendingClientPylonChanges =
+            new Dictionary<Point16, PendingClientPylonChange>();
         private static bool _initialized, _ready;
         private static int _sessionNetMode = -1;
         private static ulong _lastRequest;
@@ -27,6 +39,13 @@ namespace QualityOfTerraria.Networking
         private static readonly List<TeleportPylonInfo> ClientMapPylons = new List<TeleportPylonInfo>();
         private static Action<int, string, string> _requestHandler;
         private static Action<bool, string, string> _responseHandler;
+
+        private sealed class PendingClientPylonChange
+        {
+            internal TeleportPylonInfo Pylon;
+            internal bool Added;
+            internal ulong Expires;
+        }
 
         internal static bool Ready => Main.netMode != 1 || _ready;
         internal static IReadOnlyList<TeleportPylonInfo> Pylons => ClientPylons;
@@ -70,6 +89,12 @@ namespace QualityOfTerraria.Networking
             _clientMapScanTick = ulong.MaxValue;
             ClientPylons.Clear();
             ServerPylons.Clear();
+            ServerPylonAddedAt.Clear();
+            PendingServerPylonRemovals.Clear();
+            ClientPredictedAt.Clear();
+            ClientPredictedPylons.Clear();
+            ClientRemovedAt.Clear();
+            PendingClientPylonChanges.Clear();
             ClientMapPylons.Clear();
             Main.refreshMap = true;
         }
@@ -92,6 +117,12 @@ namespace QualityOfTerraria.Networking
             _clientMapScanTick = ulong.MaxValue;
             ClientPylons.Clear();
             ServerPylons.Clear();
+            ServerPylonAddedAt.Clear();
+            PendingServerPylonRemovals.Clear();
+            ClientPredictedAt.Clear();
+            ClientPredictedPylons.Clear();
+            ClientRemovedAt.Clear();
+            PendingClientPylonChanges.Clear();
             ClientMapPylons.Clear();
         }
 
@@ -99,6 +130,13 @@ namespace QualityOfTerraria.Networking
         {
             if (!_initialized || !Mod.WorldActive) return;
             RefreshSessionMode();
+            if (Main.netMode == 2)
+            {
+                ConfirmPendingClientPylonChanges(Main.GameUpdateCount);
+                ConfirmPendingServerPylonRemovals(Main.GameUpdateCount);
+                return;
+            }
+            PruneClientPredictions(Main.GameUpdateCount);
             if (Main.netMode != 1 || !ShouldRequestSnapshot(Main.GameUpdateCount, _lastRequest, _hasRequestedSnapshot, _ready)) return;
             _lastRequest = Main.GameUpdateCount;
             _hasRequestedSnapshot = true;
@@ -124,6 +162,12 @@ namespace QualityOfTerraria.Networking
             _clientMapScanTick = ulong.MaxValue;
             ClientPylons.Clear();
             ServerPylons.Clear();
+            ServerPylonAddedAt.Clear();
+            PendingServerPylonRemovals.Clear();
+            ClientPredictedAt.Clear();
+            ClientPredictedPylons.Clear();
+            ClientRemovedAt.Clear();
+            PendingClientPylonChanges.Clear();
             ClientMapPylons.Clear();
             Main.refreshMap = true;
             Mod.LogInfo($"晶塔同步网络模式从 {previousMode} 切换到 {Main.netMode}，重新获取服务器列表。");
@@ -175,12 +219,14 @@ namespace QualityOfTerraria.Networking
             {
                 new TeleportPylonInfo { PositionInTiles = pylon.Position, TypeOfPylon = type }
             });
+            ServerPylonAddedAt[pylon.Position] = Main.GameUpdateCount;
+            PendingServerPylonRemovals.Remove(pylon.Position);
         }
 
         internal static void ApplyServerPylonRemoved(TETeleportationPylon pylon)
         {
             if (Main.netMode != 2 || pylon == null) return;
-            ServerPylons.RemoveAll(existing => existing.PositionInTiles.Equals(pylon.Position));
+            PendingServerPylonRemovals[pylon.Position] = Main.GameUpdateCount + PylonRemovalConfirmationDelay;
         }
 
         internal static void EnsureServerPylonsInVanillaList()
@@ -210,11 +256,14 @@ namespace QualityOfTerraria.Networking
             if (Ready)
             {
                 MergeClientPylons(ClientMapPylons, ClientPylons);
+                MergeClientPylons(ClientMapPylons, ClientPredictedPylons.Values);
+                FilterClientRemovals(ClientMapPylons, Main.GameUpdateCount);
                 return ClientMapPylons;
             }
 
             MergeClientPylons(ClientMapPylons, vanillaPylons);
             MergeClientPylons(ClientMapPylons, ClientPylons);
+            MergeClientPylons(ClientMapPylons, ClientPredictedPylons.Values);
             if (Main.tile != null && (_clientMapScanTick == ulong.MaxValue || Main.GameUpdateCount - _clientMapScanTick >= 600))
             {
                 int activePylonTiles, parsedPylonFrames;
@@ -224,6 +273,7 @@ namespace QualityOfTerraria.Networking
                 if (Main.netMode == 1 && (activePylonTiles > 0 || scanned.Count > 0))
                     Mod.LogInfo($"客户端晶塔地图数据：原版={(vanillaPylons == null ? 0 : vanillaPylons.Count)}，同步={ClientPylons.Count}，图块={activePylonTiles}，恢复={scanned.Count}。");
             }
+            FilterClientRemovals(ClientMapPylons, Main.GameUpdateCount);
             return ClientMapPylons;
         }
         internal static void MergeClientPylons(List<TeleportPylonInfo> destination, IEnumerable<TeleportPylonInfo> synchronizedPylons)
@@ -235,22 +285,132 @@ namespace QualityOfTerraria.Networking
         internal static void ApplyClientPylonAdded(TeleportPylonInfo pylon)
         {
             if (Main.netMode != 1) return;
-            int existingIndex = ClientPylons.FindIndex(existing => existing.PositionInTiles.Equals(pylon.PositionInTiles));
+            // 原版 AddForClient 与服务器列表可能不同步；地图状态只接受本地操作预测和服务器快照。
+            Main.refreshMap = true;
+        }
+
+        internal static void ApplyClientPylonAddedPrediction(TeleportPylonInfo pylon)
+        {
+            if (Main.netMode != 1) return;
+            Point16 position = pylon.PositionInTiles;
+            bool wasRemoved = ClientRemovedAt.Remove(position);
+            TeleportPylonInfo predicted;
+            if (!wasRemoved && ClientPredictedPylons.TryGetValue(position, out predicted) && predicted.Equals(pylon)) return;
+
+            int existingIndex = ClientPylons.FindIndex(existing => existing.PositionInTiles.Equals(position));
             if (existingIndex >= 0)
             {
-                if (ClientPylons[existingIndex].Equals(pylon)) return;
                 ClientPylons[existingIndex] = pylon;
             }
             else ClientPylons.Add(pylon);
+            ClientPredictedPylons[position] = pylon;
+            ClientPredictedAt[position] = Main.GameUpdateCount;
+            QueueClientPylonChange(pylon, true);
             Main.refreshMap = true;
         }
 
         internal static void ApplyClientPylonRemoved(TeleportPylonInfo pylon)
         {
             if (Main.netMode != 1) return;
-            if (HasCompletePylon(pylon)) return;
-            ClientPylons.RemoveAll(existing => existing.PositionInTiles.Equals(pylon.PositionInTiles));
+            // 服务器快照与本地预测负责结束状态，原版通知只作为刷新提示，避免来回闪烁。
             Main.refreshMap = true;
+        }
+
+        internal static void ApplyClientPylonRemovedPrediction(TeleportPylonInfo pylon)
+        {
+            if (Main.netMode != 1) return;
+            Point16 position = pylon.PositionInTiles;
+            if (ClientRemovedAt.ContainsKey(position)) return;
+            ClientPylons.RemoveAll(existing => existing.PositionInTiles.Equals(position));
+            ClientPredictedPylons.Remove(position);
+            ClientPredictedAt.Remove(position);
+            ClientRemovedAt[position] = Main.GameUpdateCount;
+            QueueClientPylonChange(pylon, false);
+            Main.refreshMap = true;
+        }
+
+        private static void QueueClientPylonChange(TeleportPylonInfo pylon, bool added)
+        {
+            string payload = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0}:{1}:{2}:{3}",
+                added ? "add" : "remove", pylon.PositionInTiles.X, pylon.PositionInTiles.Y, (int)pylon.TypeOfPylon);
+            Mod.LogInfo($"晶塔本地变更：{payload}。");
+            NetSyncPayload.SendRequest(Operation, payload);
+        }
+
+        private static void PruneClientPredictions(ulong currentTick)
+        {
+            if (Main.netMode != 1 || ClientPredictedPylons.Count == 0) return;
+            bool changed = false;
+            foreach (var pair in new List<KeyValuePair<Point16, TeleportPylonInfo>>(ClientPredictedPylons))
+            {
+                ulong predictedAt;
+                if (!ClientPredictedAt.TryGetValue(pair.Key, out predictedAt) ||
+                    currentTick - predictedAt < ClientPredictionValidationDelay || HasCompletePylon(pair.Value)) continue;
+                ClientPredictedPylons.Remove(pair.Key);
+                ClientPredictedAt.Remove(pair.Key);
+                ClientPylons.RemoveAll(pylon => pylon.PositionInTiles.Equals(pair.Key));
+                changed = true;
+            }
+            if (changed) Main.refreshMap = true;
+        }
+
+        private static bool FilterClientRemovals(List<TeleportPylonInfo> pylons, ulong currentTick)
+        {
+            if (ClientRemovedAt.Count == 0) return false;
+            bool changed = false;
+            foreach (var pair in new List<KeyValuePair<Point16, ulong>>(ClientRemovedAt))
+            {
+                bool elapsed = currentTick - pair.Value >= ClientRemovalGrace;
+                bool footprintExists = HasPylonFootprint(pair.Key);
+                bool serverStillHas = ClientPylons.FindIndex(pylon => pylon.PositionInTiles.Equals(pair.Key)) >= 0;
+                if (ClientPredictedPylons.ContainsKey(pair.Key) || (elapsed && (footprintExists || !serverStillHas)))
+                {
+                    ClientRemovedAt.Remove(pair.Key);
+                    continue;
+                }
+                changed |= pylons.RemoveAll(pylon => pylon.PositionInTiles.Equals(pair.Key)) > 0;
+            }
+            return changed;
+        }
+
+        private static bool HasPylonFootprint(Point16 position)
+        {
+            int x = position.X, y = position.Y;
+            if (Main.tile == null || x < 0 || y < 0 || x + 2 >= Main.maxTilesX || y + 3 >= Main.maxTilesY) return false;
+            for (int dx = 0; dx < 3; dx++)
+            for (int dy = 0; dy < 4; dy++)
+            {
+                Tile tile = Main.tile[x + dx, y + dy];
+                TeleportPylonInfo actual;
+                if (tile == null || !TryGetPylonInfo(x + dx, y + dy, tile.active(), tile.type, tile.frameX, tile.frameY,
+                    out actual) || !actual.PositionInTiles.Equals(position)) return false;
+            }
+            return true;
+        }
+
+        private static bool MergeClientPredictions(ulong currentTick)
+        {
+            bool changed = false;
+            foreach (var pair in new List<KeyValuePair<Point16, TeleportPylonInfo>>(ClientPredictedPylons))
+            {
+                if (ClientPylons.Contains(pair.Value))
+                {
+                    ClientPredictedPylons.Remove(pair.Key);
+                    ClientPredictedAt.Remove(pair.Key);
+                    continue;
+                }
+                ulong predictedAt;
+                if (ClientPredictedAt.TryGetValue(pair.Key, out predictedAt) &&
+                    currentTick - predictedAt >= ClientPredictionValidationDelay && !HasCompletePylon(pair.Value))
+                    continue;
+                if (!ClientRemovedAt.ContainsKey(pair.Key))
+                {
+                    ClientPylons.Add(pair.Value);
+                    changed = true;
+                }
+            }
+            changed |= FilterClientRemovals(ClientPylons, currentTick);
+            return changed;
         }
 
         internal static bool ShouldDelayServerSnapshot()
@@ -263,6 +423,95 @@ namespace QualityOfTerraria.Networking
             if (Main.netMode != 2 || Main.PylonSystem == null) return;
             // OnPlaced/OnRemoved 已经刷新原版列表；拆除期间不扫描尚未清除的图块。
             ApplyServerSnapshot(ServerPylons, CollectAuthoritativePylons());
+            BroadcastServerPylons();
+        }
+
+        internal static bool ConfirmPendingServerPylonRemovals(ulong currentTick)
+        {
+            if (Main.netMode != 2 || PendingServerPylonRemovals.Count == 0) return false;
+            bool changed = false;
+            foreach (var pending in new List<KeyValuePair<Point16, ulong>>(PendingServerPylonRemovals))
+            {
+                if (currentTick < pending.Value) continue;
+                int cachedIndex = ServerPylons.FindIndex(item => item.PositionInTiles.Equals(pending.Key));
+                if (cachedIndex >= 0 && HasCompletePylon(ServerPylons[cachedIndex]))
+                {
+                    RestoreMissingServerPylonEntity(ServerPylons[cachedIndex]);
+                    ServerPylonAddedAt[ServerPylons[cachedIndex].PositionInTiles] = currentTick;
+                    PendingServerPylonRemovals.Remove(pending.Key);
+                    continue;
+                }
+
+                if (ServerPylons.RemoveAll(item => item.PositionInTiles.Equals(pending.Key)) > 0) changed = true;
+                ServerPylonAddedAt.Remove(pending.Key);
+                PendingServerPylonRemovals.Remove(pending.Key);
+            }
+            if (changed) BroadcastServerPylons();
+            return changed;
+        }
+
+        internal static void QueueServerPylonChange(int client, string payload)
+        {
+            if (Main.netMode != 2 || client < 0 || client >= Main.maxPlayers || !Main.player[client].active) return;
+            string[] parts = payload == null ? null : payload.Split(':');
+            if (parts == null || parts.Length != 4 || (parts[0] != "add" && parts[0] != "remove")) return;
+            int x, y, type;
+            if (!int.TryParse(parts[1], out x) || !int.TryParse(parts[2], out y) || !int.TryParse(parts[3], out type) ||
+                x < 0 || y < 0 || x + 2 >= Main.maxTilesX || y + 3 >= Main.maxTilesY || type < 0 || type > 32) return;
+            var position = new Point16(x, y);
+            if (PendingClientPylonChanges.Count >= 256 && !PendingClientPylonChanges.ContainsKey(position)) return;
+            PendingClientPylonChanges[position] = new PendingClientPylonChange
+            {
+                Pylon = new TeleportPylonInfo { PositionInTiles = position, TypeOfPylon = (TeleportPylonType)type },
+                Added = parts[0] == "add",
+                Expires = Main.GameUpdateCount + ClientReconcileTimeout
+            };
+        }
+
+        internal static bool ConfirmPendingClientPylonChanges(ulong currentTick)
+        {
+            if (Main.netMode != 2 || PendingClientPylonChanges.Count == 0 || !IsServerWorldReady()) return false;
+            bool changed = false;
+            foreach (var pending in new List<KeyValuePair<Point16, PendingClientPylonChange>>(PendingClientPylonChanges))
+            {
+                PendingClientPylonChange change = pending.Value;
+                if (change.Added && HasCompletePylon(change.Pylon))
+                {
+                    RestoreMissingServerPylonEntity(change.Pylon);
+                    ApplyServerSnapshot(ServerPylons, new[] { change.Pylon });
+                    ServerPylonAddedAt[pending.Key] = currentTick;
+                    PendingServerPylonRemovals.Remove(pending.Key);
+                    PendingClientPylonChanges.Remove(pending.Key);
+                    Mod.LogInfo($"晶塔服务器核验：新增 ({pending.Key.X}, {pending.Key.Y})，当前 {ServerPylons.Count} 个。");
+                    changed = true;
+                }
+                else if (!change.Added && !HasCompletePylon(change.Pylon))
+                {
+                    if (ServerPylons.RemoveAll(pylon => pylon.PositionInTiles.Equals(pending.Key)) > 0) changed = true;
+                    ServerPylonAddedAt.Remove(pending.Key);
+                    PendingServerPylonRemovals.Remove(pending.Key);
+                    PendingClientPylonChanges.Remove(pending.Key);
+                    Mod.LogInfo($"晶塔服务器核验：移除 ({pending.Key.X}, {pending.Key.Y})，当前 {ServerPylons.Count} 个。");
+                }
+                else if (currentTick >= change.Expires)
+                {
+                    PendingClientPylonChanges.Remove(pending.Key);
+                }
+            }
+            if (changed) BroadcastServerPylons();
+            return changed;
+        }
+
+        private static void RestoreMissingServerPylonEntity(TeleportPylonInfo pylon)
+        {
+            Point16 position = pylon.PositionInTiles;
+            if (TileEntity.ByPosition.ContainsKey(position)) return;
+            int id = TETeleportationPylon.Place(position.X, position.Y);
+            if (id >= 0) NetMessage.SendData(86, -1, -1, null, id, position.X, position.Y);
+        }
+
+        private static void BroadcastServerPylons()
+        {
             string payload = EncodePylons(ServerPylons);
             for (int client = 0; client < Main.maxPlayers; client++)
                 if (Main.player[client].active) NetSyncPayload.SendResponseTo(client, true, Operation, payload);
@@ -270,7 +519,14 @@ namespace QualityOfTerraria.Networking
 
         private static void SendServerList(int client, string payload)
         {
-            if (payload != "request" || client < 0 || client >= Main.maxPlayers || !Main.player[client].active) return;
+            if (client < 0 || client >= Main.maxPlayers || !Main.player[client].active) return;
+            if (payload != null && (payload.StartsWith("add:", StringComparison.Ordinal) ||
+                payload.StartsWith("remove:", StringComparison.Ordinal)))
+            {
+                QueueServerPylonChange(client, payload);
+                return;
+            }
+            if (payload != "request") return;
             if (ShouldDelayServerSnapshot()) return;
             if (!IsServerWorldReady())
             {
@@ -298,7 +554,10 @@ namespace QualityOfTerraria.Networking
             pylons = CollectAuthoritativePylons();
             if (_serverTilesScanned)
             {
-                ServerPylons.RemoveAll(pylon => !HasCompletePylon(pylon));
+                ulong now = Main.GameUpdateCount;
+                ServerPylons.RemoveAll(pylon => !HasCompletePylon(pylon) &&
+                    !WithinPlacementGrace(pylon.PositionInTiles, now) &&
+                    !PendingServerPylonRemovals.ContainsKey(pylon.PositionInTiles));
                 ApplyServerSnapshot(ServerPylons, pylons);
                 return new List<TeleportPylonInfo>(ServerPylons);
             }
@@ -315,14 +574,19 @@ namespace QualityOfTerraria.Networking
             {
                 if (!HasCompletePylon(pylon) || TileEntity.ByPosition.ContainsKey(pylon.PositionInTiles)) continue;
                 // 恢复原版实体，避免下一次原版列表重建再次发送移除通知。
-                int id = TETeleportationPylon.Place(pylon.PositionInTiles.X, pylon.PositionInTiles.Y);
-                NetMessage.SendData(86, -1, -1, null, id, pylon.PositionInTiles.X, pylon.PositionInTiles.Y);
+                RestoreMissingServerPylonEntity(pylon);
             }
             ApplyServerSnapshot(ServerPylons, pylons);
             bool changed = ApplyServerSnapshot(ServerPylons, recovered);
             string worldName = Main.ActiveWorldFileData == null ? "unknown" : Main.ActiveWorldFileData.Name;
             Mod.LogInfo($"晶塔回退扫描：世界={worldName}，地图={Main.maxTilesX}x{Main.maxTilesY}，活动晶塔图块={activePylonTiles}，有效帧={parsedPylonFrames}，本次={recovered.Count}，缓存={ServerPylons.Count}，变更={changed}。");
             return new List<TeleportPylonInfo>(ServerPylons);
+        }
+
+        private static bool WithinPlacementGrace(Point16 position, ulong currentTick)
+        {
+            ulong added;
+            return ServerPylonAddedAt.TryGetValue(position, out added) && currentTick - added < PylonPlacementGrace;
         }
 
         internal static bool TryGetPylonInfo(int x, int y, bool active, int tileType, int frameX, int frameY, out TeleportPylonInfo pylon)
@@ -433,6 +697,7 @@ namespace QualityOfTerraria.Networking
                     }
                     if (reader.BaseStream.Position != reader.BaseStream.Length) throw new InvalidDataException("服务器晶塔列表含多余数据");
                     bool changed = ReplaceClientPylons(ClientPylons, received);
+                    changed |= MergeClientPredictions(Main.GameUpdateCount);
                     bool wasReady = _ready;
                     _ready = true;
                     if (changed || !wasReady) Main.refreshMap = true;

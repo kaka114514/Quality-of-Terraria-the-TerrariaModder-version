@@ -335,6 +335,18 @@ namespace QualityOfTerraria.UI
             return _markedChests.Contains(key);
         }
 
+        internal static bool SetAutoMarkOpenedChests(bool enabled)
+        {
+            if (Mod.Config == null) return false;
+            bool previous = Mod.Config.AutoMarkOpenedChests;
+            Mod.Config.AutoMarkOpenedChests = enabled;
+            string error;
+            if (SettingsSync.SaveVerified(Mod.Config, out error)) return true;
+            Mod.Config.AutoMarkOpenedChests = previous;
+            Main.NewText("【终极存储】自动标记设置保存失败：" + error, 255, 150, 120);
+            return false;
+        }
+
         public static void MarkChest(int chestIndex)
         {
             EnsureLoadedForCurrentWorld();
@@ -706,9 +718,12 @@ namespace QualityOfTerraria.UI
             if (_markedChests.Count == 0)
             {
                 int availableHeight = _footerY - _contentY;
-                string[] lines = availableHeight < 80
-                    ? new[] { "尚未标记储物箱", "打开箱子，或在“箱子管理”中标记。" }
-                    : new[] { "尚未标记储物箱", "在游戏中打开箱子即可自动标记。", "也可在“箱子管理”中选择标记。" };
+                bool autoMark = Mod.Config?.AutoMarkOpenedChests == true;
+                string[] lines = autoMark
+                    ? availableHeight < 80
+                        ? new[] { "尚未标记储物箱", "打开箱子，或在“箱子管理”中标记。" }
+                        : new[] { "尚未标记储物箱", "打开箱子会自动标记。", "也可在“箱子管理”中选择标记。" }
+                    : new[] { "尚未标记储物箱", "自动标记已关闭，可在“箱子管理”中手动标记。" };
                 int lineHeight = Math.Min(28, (availableHeight - 8) / lines.Length);
                 for (int i = 0; i < lines.Length; i++)
                     PanelLayout.DrawFittedText(lines[i], startX, startY + 4 + i * lineHeight,
@@ -850,8 +865,18 @@ namespace QualityOfTerraria.UI
                 if (IsChestMarked(GetChestMetadata(c))) markedCount++;
             }
 
+            int autoWidth = Math.Min(180, Math.Max(130, (PanelWidth - 32) / 2));
+            bool autoMark = Mod.Config?.AutoMarkOpenedChests == true;
             string summaryText = $"已标记: {markedCount} / 共发现: {validChests.Count} 个世界储物箱";
-            PanelLayout.DrawFittedText(summaryText, startX, startY + 4, PanelWidth - 32, 220, 220, 200);
+            PanelLayout.DrawFittedText(summaryText, startX, startY + 4,
+                Math.Max(80, PanelWidth - 40 - autoWidth), 220, 220, 200);
+            if (DrawButton("自动标记：" + (autoMark ? "开启" : "关闭"),
+                startX + PanelWidth - 32 - autoWidth, startY, autoWidth, 26, autoMark))
+            {
+                if (SetAutoMarkOpenedChests(!autoMark))
+                    Main.NewText("【终极存储】打开箱子时自动标记：" + (!autoMark ? "已开启" : "已关闭"),
+                        150, 230, 255);
+            }
 
             int btnW = (PanelWidth - 52) / 3;
             startY += 24;
@@ -1426,6 +1451,7 @@ namespace QualityOfTerraria.UI
             var config = Mod.Config;
             string[] lines = {
                 "箱内材料：全世界自己的有效标记箱，可远程合成",
+                "打开箱子自动标记：" + (config?.AutoMarkOpenedChests == true ? "开启" : "关闭"),
                 "无限药水：" + (config?.InfinitePotions == true ? "开启" : "关闭") + "，同种药水累计至少 " + (config?.PotionStackRequirement ?? 30) + " 瓶；只读取自己明确标记的箱子",
                 "便携制作站（含远程标记箱）：" + (config?.PortableCraftingStations == true ? "开启" : "关闭"),
                 "增益站：" + (config?.InfiniteStationsAndBanners == true ? "开启" : "关闭"),

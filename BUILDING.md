@@ -13,7 +13,7 @@
 
 ## 回归检查
 
-晶塔与设置同步回归：构建客户端和专服后，分别运行 `pwsh -File tests/PortableStorage.Tests.ps1 -PylonOnly`、`pwsh -File tests/PortableStorage.Tests.ps1 -SyncOnly` 和 `pwsh -File tests/MultiplayerSettings.Server.Tests.ps1`。覆盖缺失晶塔实体恢复、原版重复刷新、实际移除、邻格挖掘、长列表分片，以及设置申请、同意、保存、反馈和登记重试；网络发送由测试捕获，真实双客户端联机仍需游戏内验证。
+晶塔与设置同步回归：构建客户端和专服后，分别运行 `pwsh -File tests/PortableStorage.Tests.ps1 -PylonOnly`、`pwsh -File tests/PortableStorage.Tests.ps1 -SyncOnly` 和 `pwsh -File tests/MultiplayerSettings.Server.Tests.ps1`。覆盖客户端放置预测、旧 0 快照覆盖、本地拆除后旧名单回显、同一坐标再放置、客户端坐标通知、服务器图块核验、原版事件漏报、失败挖掘保护、实体恢复和长列表分片，以及设置申请、同意、保存、反馈和登记重试；网络发送由测试捕获，真实双客户端联机仍需游戏内验证。
 
 熔岩自动钓鱼回归：构建客户端后运行 `pwsh -NoProfile -File tests/Autofisher.Lava.Tests.ps1`。测试使用真实游戏的钓鱼掉落表、液体检测、装备效果、上钩、鱼饵消耗与收杆方法，覆盖单机及联机客户端状态下的熔岩许可组合、未上钩的等待进度、水和蜂蜜；物品交付与装饰鱼显示由测试捕获，不代替游戏内联机实测。
 
