@@ -75,6 +75,8 @@ namespace QualityOfTerraria.UI
 
         internal static void Draw()
         {
+            // 自动暂停会跳过 Player.Update，布局和收纳状态仍需跟随界面刷新。
+            if (IsOpen || _owner != null) Update();
             if (!IsOpen || !UIManager.CanRender) return;
             int mx = UIRenderer.MouseX, my = UIRenderer.MouseY;
             if (mx >= _x && mx < _x + _width && my >= _y && my < _y + _height) Main.LocalPlayer.mouseInterface = true;

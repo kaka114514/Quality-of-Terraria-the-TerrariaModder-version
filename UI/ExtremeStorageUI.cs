@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using Microsoft.Xna.Framework;
 using Terraria;
@@ -60,9 +61,9 @@ namespace QualityOfTerraria.UI
         private static int _dragOffsetY = 0;
         private static bool _storageActionHeld;
         private static int _storageActionNeutralFrames;
-        private static ulong _storageActionCooldownUntil;
+        private static long _storageActionCooldownUntil;
         private static bool _forceUnlockArmed;
-        private const ulong StorageActionCooldownFrames = 5;
+        private static readonly long StorageActionCooldownTicks = Stopwatch.Frequency / 12;
 
         public static StorageTab CurrentTab = StorageTab.All;
         public static ItemSortMode CurrentSortMode = ItemSortMode.Default;
@@ -1213,7 +1214,7 @@ namespace QualityOfTerraria.UI
         private static bool BeginStorageAction()
         {
             if (_storageActionHeld) return false;
-            if (Main.GameUpdateCount < _storageActionCooldownUntil) return false;
+            if (!BeginQuickDeposit()) return false;
             _storageActionHeld = true;
             _storageActionNeutralFrames = 0;
             return true;
@@ -1236,20 +1237,21 @@ namespace QualityOfTerraria.UI
 
         private static void ArmStorageActionCooldown()
         {
-            _storageActionCooldownUntil = Main.GameUpdateCount + StorageActionCooldownFrames;
+            // 自动暂停会停止游戏帧计数，存取冷却使用独立的单调计时。
+            _storageActionCooldownUntil = Stopwatch.GetTimestamp() + StorageActionCooldownTicks;
         }
 
         // Shift 快速存储入口：检查是否可以开始存储（供 InventoryAndReforgePatches 调用）
         public static bool BeginQuickDeposit()
         {
             // 只检查冷却，不需要按住锁存（Shift 存储不会连续触发同一个槽位）
-            return Main.GameUpdateCount >= _storageActionCooldownUntil;
+            return Stopwatch.GetTimestamp() >= _storageActionCooldownUntil;
         }
 
         // Shift 快速存储成功后设置冷却（供 InventoryAndReforgePatches 调用）
         public static void ArmQuickDepositCooldown()
         {
-            _storageActionCooldownUntil = Main.GameUpdateCount + StorageActionCooldownFrames;
+            ArmStorageActionCooldown();
         }
 
         private static void DepositMatchingItems()
