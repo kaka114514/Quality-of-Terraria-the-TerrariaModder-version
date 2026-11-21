@@ -161,7 +161,7 @@ namespace QualityOfTerraria
 
         [Client]
         [Label("金币自动存入猪猪钱罐")]
-        [Description("拾取的金币自动转移至猪猪钱罐中，防止意外掉落。")]
+        [Description("拾取的钱币自动转移至猪猪钱罐，合并同面额货币，并将满100的铜币、银币和金币进位；空间不足时保留原币。")]
         public bool AutoSaveCoins { get; set; } = false;
 
         [Client]

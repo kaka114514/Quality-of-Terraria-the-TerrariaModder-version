@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Net.Http;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Terraria;
@@ -19,6 +20,8 @@ namespace QualityOfTerraria
         {
             get
             {
+                var info = typeof(Mod).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>();
+                if (!string.IsNullOrEmpty(info?.InformationalVersion)) return info.InformationalVersion.Split('+')[0];
                 Version version = typeof(Mod).Assembly.GetName().Version ?? new Version(0, 0);
                 return version.Build >= 0 ? version.ToString(3) : version.ToString(2);
             }
@@ -58,10 +61,20 @@ namespace QualityOfTerraria
         internal static bool IsNewer(string remoteTag)
         {
             if (string.IsNullOrEmpty(remoteTag)) return false;
-            Version remote;
+            Version remote = ParseReleaseVersion(remoteTag);
             Version local = typeof(Mod).Assembly.GetName().Version ?? new Version(0, 0);
-            string value = remoteTag.Trim().TrimStart('v', 'V');
-            return Version.TryParse(value, out remote) && remote > local;
+            return remote != null && remote > local;
+        }
+
+        private static Version ParseReleaseVersion(string tag)
+        {
+            string value = tag.Trim().TrimStart('v', 'V');
+            bool fix = value.EndsWith("fix", StringComparison.OrdinalIgnoreCase);
+            if (fix) value = value.Substring(0, value.Length - 3).TrimEnd(' ', '-');
+            Version version;
+            if (!Version.TryParse(value, out version)) return null;
+            return new Version(version.Major, version.Minor, Math.Max(0, version.Build),
+                fix ? 1 : Math.Max(0, version.Revision));
         }
 
         private static async Task<string> QueryLatestAsync()

@@ -76,27 +76,36 @@ namespace QualityOfTerraria.Patches
         internal static void CompactCoinStacks(Item[] items)
         {
             if (items == null) return;
-            for (int type = ItemID.CopperCoin; type <= ItemID.PlatinumCoin; type++)
+            var slots = new List<int>();
+            var counts = new long[4];
+            for (int slot = 0; slot < items.Length; slot++)
             {
-                int targetSlot = -1;
-                for (int slot = 0; slot < items.Length; slot++)
-                {
-                    Item item = items[slot];
-                    if (item == null || item.IsAir || item.type != type) continue;
-                    if (targetSlot < 0 || targetSlot >= items.Length || items[targetSlot] == null ||
-                        items[targetSlot].IsAir || items[targetSlot].type != type || items[targetSlot].stack >= items[targetSlot].maxStack)
-                    {
-                        targetSlot = slot;
-                        continue;
-                    }
-
-                    Item target = items[targetSlot];
-                    int moved = Math.Min(item.stack, target.maxStack - target.stack);
-                    target.stack += moved;
-                    item.stack -= moved;
-                    if (item.stack <= 0) item.TurnToAir();
-                }
+                Item item = items[slot];
+                if (item == null || item.IsAir) { slots.Add(slot); continue; }
+                if (item.type < ItemID.CopperCoin || item.type > ItemID.PlatinumCoin) continue;
+                slots.Add(slot);
+                counts[item.type - ItemID.CopperCoin] += item.stack;
             }
+            for (int type = 0; type < 3; type++)
+            {
+                counts[type + 1] += counts[type] / 100;
+                counts[type] %= 100;
+            }
+
+            // 先确认进位后的各面额与余数都能放下，满格时保留原币。
+            var coins = new List<Item>();
+            for (int type = 3; type >= 0; type--)
+                while (counts[type] > 0)
+                {
+                    if (coins.Count >= slots.Count) return;
+                    var coin = new Item();
+                    coin.SetDefaults(ItemID.CopperCoin + type);
+                    coin.stack = (int)Math.Min(counts[type], coin.maxStack);
+                    counts[type] -= coin.stack;
+                    coins.Add(coin);
+                }
+            for (int i = 0; i < slots.Count; i++)
+                items[slots[i]] = i < coins.Count ? coins[i] : new Item();
         }
 
         internal static bool ShouldAutoMarkOpenedChest(int playerIndex)
