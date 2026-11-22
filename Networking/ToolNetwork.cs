@@ -15,7 +15,7 @@ namespace QualityOfTerraria.Networking
         private sealed class Peer
         {
             internal Player Player;
-            internal string Guid, Nonce, LastRequest, LastResponse;
+            internal string Guid, Nonce, Hello, HelloResponse, LastRequest, LastResponse;
             internal long Sequence;
             internal int[] Liquids;
             // 大面积框选的分帧铺设任务；完成后单独返回结果。
@@ -34,7 +34,7 @@ namespace QualityOfTerraria.Networking
         private static string _action;
         private static Action _afterHello;
         private static long _sequence;
-        private static ulong _sent, _liquidFrame;
+        private static ulong _sent, _started, _liquidFrame;
         private static int _slot = -1, _type, _stack;
         private static byte _prefix;
         private static int[] _singlePlayerLiquids;
@@ -64,7 +64,7 @@ namespace QualityOfTerraria.Networking
             _afterHello = null;
             _sequence = 0;
             _slot = -1;
-            _sent = _liquidFrame = 0;
+            _sent = _started = _liquidFrame = 0;
         }
 
         internal static void Unload()
@@ -93,20 +93,30 @@ namespace QualityOfTerraria.Networking
             Player player = Main.LocalPlayer;
             player.mouseInterface = true;
             player.controlUseItem = false;
-            if (Main.GameUpdateCount - _sent < 300) return;
+            ulong now = Main.GameUpdateCount;
+            if (now - _sent < (_slot >= 0 ? 300UL : 120UL)) return;
             if (_slot >= 0)
             {
-                _sent = Main.GameUpdateCount;
+                _sent = now;
                 NetSyncPayload.SendRequest(Operation, _payload);
                 Main.NewText("正在查询同一工具操作的材料结果；等待期间库存保持锁定", 255, 180, 100);
                 return;
             }
+            if (now - _started < 600)
+            {
+                _sent = now;
+                NetSyncPayload.SendRequest(Operation, _payload);
+                return;
+            }
+            string timedOut = _action;
             _pending = _nonce = null;
             _payload = null;
+            _action = null;
             LiquidStatus = "服务器未确认";
             _afterHello = null;
             _slot = -1;
-            Main.NewText("工具操作未收到服务器确认，请等待库存同步后重试", 255, 180, 100);
+            Main.NewText(timedOut == "hello" ? "工具服务连接超时，本次操作未提交" :
+                "服务器未返回工具操作结果，请先检查操作是否已生效", 255, 180, 100);
         }
 
         internal static void Request(string action, int slot = -1, params int[] values)
@@ -119,7 +129,7 @@ namespace QualityOfTerraria.Networking
                 Main.NewText("正在等待服务器存储操作确认，请稍后使用工具", 255, 180, 100);
                 return;
             }
-            if (!NetSync.LocalPlayerHasModAccess("quality-of-terraria"))
+            if (action != "hello" && action != "world-toggle" && !NetSync.LocalPlayerHasModAccess("quality-of-terraria"))
             {
                 Main.NewText("服务器未授予本模组工具权限", 255, 120, 120);
                 return;
@@ -135,7 +145,7 @@ namespace QualityOfTerraria.Networking
             }
             _pending = Guid.NewGuid().ToString("N");
             _action = action;
-            _sent = Main.GameUpdateCount;
+            _sent = _started = Main.GameUpdateCount;
             if (action == "liquid") { _liquidFrame = _sent; LiquidStatus = "服务器待确认"; }
             _slot = slot;
             Item item = slot >= 0 && slot < Main.LocalPlayer.inventory.Length ? Main.LocalPlayer.inventory[slot] : null;
@@ -166,7 +176,7 @@ namespace QualityOfTerraria.Networking
             }
             // 联机卡顿诊断：请求本身在主线程完成日志写入与库存同步，超过一帧就记录一次。
             if (clock.ElapsedMilliseconds >= 8) Mod.LogInfo($"[快速放置] 客户端请求准备耗时 {clock.ElapsedMilliseconds}ms（{action}）");
-            if (action != "liquid") Main.NewText("正在等待服务器工具操作确认", 200, 220, 255);
+            if (action != "liquid" && action != "hello") Main.NewText("正在等待服务器工具操作确认", 200, 220, 255);
         }
 
         internal static bool RequestStructurePaste(int x, int y, bool consumeMaterials, bool destroyTerrain)
@@ -181,26 +191,44 @@ namespace QualityOfTerraria.Networking
             {
                 Main.NewText("结构粘贴：结构数据过大或尚未选择结构", 255, 180, 100); return false;
             }
+            return SubmitPaste(x, y, consumeMaterials, destroyTerrain, structure);
+        }
+
+        private static bool SubmitPaste(int x, int y, bool consumeMaterials, bool destroyTerrain, string structure)
+        {
+            string id = Guid.NewGuid().ToString("N");
+            string payload = BuildPasteRequest(id, _nonce ?? new string('0', 32), _sequence + 1, x, y, consumeMaterials, destroyTerrain, structure);
+            if (!NetSyncPayload.CanSend(payload))
+            {
+                Main.NewText("结构粘贴：超出联机传输上限，请缩小复制范围", 255, 180, 100);
+                return false;
+            }
             if (_nonce == null)
             {
-                int savedX = x, savedY = y; bool savedConsume = consumeMaterials, savedDestroy = destroyTerrain;
-                _afterHello = () => RequestStructurePaste(savedX, savedY, savedConsume, savedDestroy);
+                _afterHello = () => SubmitPaste(x, y, consumeMaterials, destroyTerrain, structure);
                 Request("hello");
                 return true;
             }
-            _pending = Guid.NewGuid().ToString("N");
-            _action = "paste-structure"; _slot = -1; _sent = Main.GameUpdateCount;
+            if (Busy || RemoteStorageOperations.Busy) return false;
+            _pending = id;
+            _action = "paste-structure"; _slot = -1; _sent = _started = Main.GameUpdateCount;
+            _sequence++;
+            _payload = payload;
+            NetSyncPayload.SendRequest(Operation, _payload);
+            return true;
+        }
+
+        private static string BuildPasteRequest(string id, string nonce, long sequence, int x, int y, bool consumeMaterials, bool destroyTerrain, string structure)
+        {
             using (var stream = new MemoryStream())
             using (var writer = new BinaryWriter(stream))
             {
-                writer.Write(_pending); writer.Write(_nonce); writer.Write(++_sequence);
-                writer.Write(_action); writer.Write(-1); writer.Write(0); writer.Write(0); writer.Write((byte)0);
+                writer.Write(id); writer.Write(nonce); writer.Write(sequence);
+                writer.Write("paste-structure"); writer.Write(-1); writer.Write(0); writer.Write(0); writer.Write((byte)0);
                 writer.Write(4); writer.Write(x); writer.Write(y); writer.Write(consumeMaterials ? 1 : 0); writer.Write(destroyTerrain ? 1 : 0);
                 writer.Write(structure);
-                _payload = Convert.ToBase64String(stream.ToArray());
+                return Convert.ToBase64String(stream.ToArray());
             }
-            NetSyncPayload.SendRequest(Operation, _payload);
-            return true;
         }
 
         private static bool SamePeer(int client, Peer peer)
@@ -227,11 +255,11 @@ namespace QualityOfTerraria.Networking
             Peer peer = null;
             int slot = -1;
             long requestSequence = 0;
-            bool ok = false, remember = false, noConsume = false;
+            bool ok = false, remember = false, noConsume = false, helloRequest = false;
             try
             {
                 // 结构粘贴包含压缩后的结构数据，NetSyncPayload 已负责分片；这里校验完整载荷而不是单片长度。
-                if (payload == null || payload.Length > 60000) throw new InvalidDataException(message);
+                if (!NetSyncPayload.CanSend(payload)) throw new InvalidDataException(message);
                 using (var reader = new BinaryReader(new MemoryStream(Convert.FromBase64String(payload))))
                 {
                     token = reader.ReadString(); string nonce = reader.ReadString(); long sequence = reader.ReadInt64();
@@ -242,11 +270,16 @@ namespace QualityOfTerraria.Networking
                     var values = new int[count]; for (int i = 0; i < count; i++) values[i] = reader.ReadInt32();
                     string structurePayload = action == "paste-structure" ? reader.ReadString() : null;
                     if (reader.BaseStream.Position != reader.BaseStream.Length) throw new InvalidDataException(message);
-                    if (!PermissionService.HasModAccess(client, "quality-of-terraria")) throw new InvalidDataException("服务器未授予本模组工具权限");
+                    if (action != "hello" && action != "world-toggle" && !PermissionService.HasModAccess(client, "quality-of-terraria")) throw new InvalidDataException("服务器未授予本模组工具权限");
                     if (string.IsNullOrEmpty(PermissionService.GetGuid(client))) throw new InvalidDataException("玩家身份尚未确认");
                     if (Peers.TryGetValue(client, out peer) && !SamePeer(client, peer)) { Peers.Remove(client); peer = null; }
                     if (action == "hello")
                     {
+                        if (peer != null && peer.Hello == payload && peer.HelloResponse != null)
+                        {
+                            NetSyncPayload.SendResponseTo(client, true, Operation, RefreshResponseWorldFlags(peer.HelloResponse));
+                            return;
+                        }
                         if (peer == null)
                         {
                             string identity = PermissionService.GetGuid(client);
@@ -261,7 +294,7 @@ namespace QualityOfTerraria.Networking
                         StorageTransactionJournal.InitializeServer(RemoteStorageOperations.WorldIdentity);
                         StorageTransactionJournal.RegisterServerToken(peer.Guid, peer.Nonce);
                         message = "工具服务器会话已确认";
-                        ok = remember = true;
+                        ok = helloRequest = true;
                     }
                     else
                     {
@@ -377,10 +410,17 @@ namespace QualityOfTerraria.Networking
                         {
                             if (!PermissionService.IsAdmin(client)) throw new InvalidDataException("节日和世界状态需要房主或服务器管理权限");
                             if (count != 2 || values[0] < 0 || values[0] > 5 || values[1] < 0 || values[1] > 1) throw new InvalidDataException("世界状态请求无效");
-                            if (values[0] < 2) Features.WorldControlSystem.SetHoliday(values[0], values[1] != 0);
-                            else { bool[] flags = GetWorldFlags(); flags[values[0]] = values[1] != 0; SetWorldFlags(flags); }
-                            NetMessage.SendData(MessageID.WorldData);
-                            message = "服务器已确认世界状态";
+                            if (values[0] < 2)
+                            {
+                                Features.WorldControlSystem.SetHoliday(values[0], values[1] != 0);
+                                message = (values[0] == 0 ? "万圣节" : "圣诞节") + (values[1] != 0 ? "已开启" : "已关闭");
+                            }
+                            else
+                            {
+                                bool[] flags = GetWorldFlags(); flags[values[0]] = values[1] != 0; SetWorldFlags(flags);
+                                NetMessage.SendData(MessageID.WorldData);
+                                message = "服务器已确认世界状态";
+                            }
                         }
                         else if (action == "world-time")
                         {
@@ -408,6 +448,7 @@ namespace QualityOfTerraria.Networking
             }
             catch (Exception error) { message = error.Message; }
             string response = RecordAndBuildResponse(peer, remember, token, slot, player, ok, message, noConsume, requestSequence);
+            if (helloRequest) { peer.Hello = payload; peer.HelloResponse = response; }
             if (peer != null && remember) { peer.LastRequest = payload; peer.LastResponse = response; }
             if (ok && slot >= 0 && !noConsume) NetMessage.SendData(MessageID.SyncEquipment, -1, -1, null, client, slot);
             NetSyncPayload.SendResponseTo(client, ok, Operation, response);
@@ -584,14 +625,19 @@ namespace QualityOfTerraria.Networking
                         else if (!already) { conflict = true; message += "；材料发生外部变化，保留等待状态以避免覆盖物品"; }
                     }
                     SetLiquids(liquids);
-                    SetWorldFlags(flags);
+                    // 节日随原版世界数据同步，普通工具的延迟回执不能覆盖节日状态。
+                    if (ok)
+                    {
+                        flags[0] = Main.halloween; flags[1] = Main.xMas;
+                        SetWorldFlags(flags);
+                    }
                     Player localPlayer = Main.LocalPlayer;
                     if (ok && _action == "travel-shop" && localPlayer.talkNPC >= 0 && localPlayer.talkNPC < Main.maxNPCs &&
                         Main.npc[localPlayer.talkNPC].active && Main.npc[localPlayer.talkNPC].type == NPCID.TravellingMerchant &&
                         Main.npcShop > 0 && Main.npcShop < Main.instance.shop.Length)
                         Main.instance.shop[Main.npcShop].SetupShop(Main.npcShop);
                     LiquidStatus = ok ? "服务器已确认" : "服务器未确认";
-                    if (_action != "liquid" || !ok) Main.NewText(message, ok ? (byte)120 : (byte)255, ok ? (byte)255 : (byte)160, 120);
+                    if (!ok || (_action != "liquid" && _action != "hello")) Main.NewText(message, ok ? (byte)120 : (byte)255, ok ? (byte)255 : (byte)160, 120);
                     if (conflict) return;
                     if (slot >= 0 && !StorageTransactionJournal.CompleteClient())
                     {

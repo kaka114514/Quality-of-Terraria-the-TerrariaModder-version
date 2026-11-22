@@ -3,7 +3,6 @@ using HarmonyLib;
 using Terraria;
 using QualityOfTerraria.Features;
 using QualityOfTerraria.Networking;
-using TerrariaModder.Core.Permissions;
 
 namespace QualityOfTerraria.Patches
 {
@@ -19,8 +18,8 @@ namespace QualityOfTerraria.Patches
             VeinMiningOriginContext.Sender = Main.netMode == 2 && !Mod.VeinMinerLegacyLoaded && bufferIndex >= 0 && bufferIndex < Main.maxPlayers ? bufferIndex : -1;
         }
 
-        [HarmonyPostfix]
-        internal static void Postfix(int __state) => VeinMiningOriginContext.Sender = __state;
+        [HarmonyFinalizer]
+        internal static void Finalizer(int __state) => VeinMiningOriginContext.Sender = __state;
     }
 
     internal static class VeinMiningOriginContext
@@ -50,7 +49,6 @@ namespace QualityOfTerraria.Patches
             int sender = VeinMiningOriginContext.Sender;
             if (sender < 0) return;
             PacketKills++;
-            if (!PermissionService.HasModAccess(sender, "quality-of-terraria")) return;
             Player player = Main.player[sender];
             // 不在这里要求手持镐子：物品同步可能晚于破矿包，请求阶段会重新校验镐力与权限。
             if (player == null || !player.active || player.dead) return;

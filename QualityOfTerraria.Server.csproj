@@ -2,10 +2,10 @@
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
     <AssemblyName>QualityOfTerraria.Server</AssemblyName>
-    <Version>1.2.10-fix</Version>
-    <AssemblyVersion>1.2.10.1</AssemblyVersion>
-    <FileVersion>1.2.10.1</FileVersion>
-    <InformationalVersion>1.2.10fix</InformationalVersion>
+    <Version>1.2.11</Version>
+    <AssemblyVersion>1.2.11.0</AssemblyVersion>
+    <FileVersion>1.2.11.0</FileVersion>
+    <InformationalVersion>1.2.11</InformationalVersion>
     <RootNamespace>QualityOfTerraria</RootNamespace>
     <OutputType>Library</OutputType>
     <LangVersion>latest</LangVersion>

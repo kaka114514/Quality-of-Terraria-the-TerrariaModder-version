@@ -81,7 +81,6 @@ namespace QualityOfTerraria.Networking
         internal static void Request(int x, int y, ushort type, bool forced)
         {
             if (!_initialized || Main.netMode != 1 || !Mod.WorldActive || Mod.VeinMinerLegacyLoaded) return;
-            if (!NetSync.LocalPlayerHasModAccess("quality-of-terraria")) return;
             // 如果有请求正在处理或队列已满，静默忽略新请求（避免服务器拒绝提示）
             if (_pendingPayload != null || ClientQueue.Count >= 4)
             {
@@ -96,7 +95,6 @@ namespace QualityOfTerraria.Networking
         private static void SendNext()
         {
             if (_pendingPayload != null || Main.netMode != 1 || !Mod.WorldActive || Mod.VeinMinerLegacyLoaded) return;
-            if (!NetSync.LocalPlayerHasModAccess("quality-of-terraria")) return;
             while (ClientQueue.Count > 0 && Main.GameUpdateCount - ClientQueue.Peek().Frame > 180) ClientQueue.Dequeue();
             if (_nonce != null && ClientQueue.Count == 0) return;
             _pendingId = Guid.NewGuid().ToString("N");
@@ -127,25 +125,7 @@ namespace QualityOfTerraria.Networking
                     Peer peer = Peers[slot];
                     if (!SamePeer(slot, peer)) { Peers.Remove(slot); continue; }
 
-                    // 检查等待完成的连锁挖矿任务
-                    if (peer.JobStarted)
-                    {
-                        var completed = VeinMiningSystem.TakeCompletedJob(slot);
-                        if (completed != null)
-                        {
-                            Mod.LogInfo($"[连锁挖矿服务器] 任务完成: slot={slot}, count={completed.Count}, ore={completed.OreName}");
-                            // 任务完成，发送响应
-                            string message = completed.Count > 1 ? $"{completed.Count}|{completed.OreName}" : "";
-                            peer.Response = Response(peer.Waiting.Id, peer.Nonce, peer.Sequence, message);
-                            peer.Result = true;
-                            peer.Waiting = null;
-                            peer.JobStarted = false;
-                            NetSyncPayload.SendResponseTo(slot, true, Operation, peer.Response);
-                        }
-                        continue; // 跳过 TryStart，等任务完成
-                    }
-
-                    if (peer.Waiting != null) TryStart(slot, peer);
+                    if (peer.Waiting != null && !peer.JobStarted) TryStart(slot, peer);
                 }
             }
             if (Main.netMode != 1 || !Mod.WorldActive || Mod.VeinMinerLegacyLoaded) return;
@@ -228,7 +208,7 @@ namespace QualityOfTerraria.Networking
                 {
                     id = reader.ReadString(); string nonce = reader.ReadString(); sequence = reader.ReadInt64(); bool hello = reader.ReadBoolean();
                     if (id.Length != 32 || nonce.Length > 32 || sequence < 0) throw new InvalidDataException();
-                    if (!PermissionService.HasModAccess(slot, "quality-of-terraria") || string.IsNullOrEmpty(PermissionService.GetGuid(slot))) throw new InvalidDataException("服务器未授予连锁挖矿权限");
+                    if (string.IsNullOrEmpty(PermissionService.GetGuid(slot))) throw new InvalidDataException("连锁挖矿：玩家身份尚未确认");
                     if (hello)
                     {
                         if (nonce.Length != 0 || sequence != 0 || reader.BaseStream.Position != reader.BaseStream.Length) throw new InvalidDataException();
@@ -268,16 +248,6 @@ namespace QualityOfTerraria.Networking
             RequestData request = peer.Waiting;
             var config = SettingsSync.GetPlayerConfig(slot);
 
-            // 权限检查：房主并开启模式下允许所有玩家（临时方案）
-            bool hasAccess = PermissionService.HasModAccess(slot, "quality-of-terraria");
-            bool isHost = Main.netMode == 1 || (Main.netMode == 2 && Netplay.Clients[slot].State == 10);
-            if (!hasAccess && !isHost)
-            {
-                Mod.LogInfo($"[连锁挖矿服务端] 权限检查失败: slot={slot}, hasAccess={hasAccess}, isHost={isHost}");
-                Finish(slot, peer, false, "服务器未授予本模组功能权限");
-                return;
-            }
-
             // 其他检查
             if (peer.Player.dead)
             {
@@ -286,7 +256,7 @@ namespace QualityOfTerraria.Networking
             }
             if (config == null)
             {
-                Finish(slot, peer, false, "配置未加载");
+                if (Main.GameUpdateCount - request.Frame >= 120) Finish(slot, peer, false, "连锁挖矿：服务器尚未收到个人设置");
                 return;
             }
             if (!config.VeinMiningEnabled && !request.Forced)
@@ -294,9 +264,9 @@ namespace QualityOfTerraria.Networking
                 Finish(slot, peer, false, "连锁挖矿未启用");
                 return;
             }
-            if (peer.Player.HeldItem.pick <= 0)
+            if (peer.Player.HeldItem == null || peer.Player.HeldItem.pick <= 0)
             {
-                Finish(slot, peer, false, "未持有有效镐子");
+                if (Main.GameUpdateCount - request.Frame >= 120) Finish(slot, peer, false, "服务器未检测到正在使用的镐子");
                 return;
             }
             if (!VeinMiningSystem.IsChainable(request.Type, config))
@@ -308,7 +278,7 @@ namespace QualityOfTerraria.Networking
             Proof proof = Proofs.Find(p => ReferenceEquals(p.Player, peer.Player) && p.X == request.X && p.Y == request.Y && p.Type == request.Type && Main.GameUpdateCount - p.Frame <= 180);
             if (proof == null)
             {
-                if (Main.GameUpdateCount - request.Frame >= 15)
+                if (Main.GameUpdateCount - request.Frame >= 120)
                 {
                     // 保留诊断信息：联机失败时能区分"服务端没收到原版破矿"和"记录被其他请求用掉"。
                     Mod.LogInfo($"[连锁挖矿] 未匹配原版破矿来源：玩家={slot}，位置=({request.X}, {request.Y})，矿石={request.Type}，当前来源记录={Proofs.Count}，包内破块={Patches.VeinMiningOriginTilePatch.PacketKills}，包内破矿={Patches.VeinMiningOriginTilePatch.PacketOreKills}，Postfix={Patches.VeinMiningOriginTilePatch.PostfixCalls}/{Patches.VeinMiningOriginTilePatch.PostfixRecorded}，来源登记={RecordBreakCalls}/{RecordBreakAccepted}，最近拒绝={LastRecordBreakReject ?? "无"}");
@@ -317,10 +287,17 @@ namespace QualityOfTerraria.Networking
                 }
                 return;
             }
+            if (Main.tile[request.X, request.Y]?.active() == true)
+            { Finish(slot, peer, false, "起始矿块已发生变化"); return; }
             Proofs.Remove(proof);
             if (proof.ToolType != 0 && (proof.ToolType != peer.Player.HeldItem.type || proof.Prefix != peer.Player.HeldItem.prefix || proof.Pick != peer.Player.HeldItem.pick))
             { Finish(slot, peer, false, "原版挖矿后工具已改变"); return; }
-            bool started = VeinMiningSystem.Start(peer.Player, request.X, request.Y, proof.Type, config);
+            bool started = VeinMiningSystem.Start(peer.Player, request.X, request.Y, proof.Type, config, (count, ore, error) =>
+            {
+                if (peer.Waiting != request) return;
+                peer.JobStarted = false;
+                if (SamePeer(slot, peer)) Finish(slot, peer, error == null, error ?? (count > 1 ? $"{count}|{ore}" : ""));
+            });
             Mod.LogInfo($"[连锁挖矿服务器] TryStart: slot={slot}, started={started}, player.whoAmI={peer.Player.whoAmI}, 坐标=({request.X},{request.Y})");
             if (started)
             {
@@ -337,16 +314,6 @@ namespace QualityOfTerraria.Networking
         private static void Finish(int slot, Peer peer, bool ok, string message)
         {
             peer.Result = ok;
-            // 成功时，尝试获取连锁结果（数量和矿石名称）
-            if (ok)
-            {
-                var completed = VeinMiningSystem.TakeCompletedJob(slot);
-                if (completed != null && completed.Count > 1)
-                {
-                    // 格式：count|oreName （例如："5|铜矿石"）
-                    message = $"{completed.Count}|{completed.OreName}";
-                }
-            }
             peer.Response = Response(peer.Waiting.Id, peer.Nonce, peer.Sequence, message);
             peer.Waiting = null;
             NetSyncPayload.SendResponseTo(slot, ok, Operation, peer.Response);
@@ -377,7 +344,19 @@ namespace QualityOfTerraria.Networking
                 {
                     string id = reader.ReadString(), nonce = reader.ReadString(); long sequence = reader.ReadInt64(); string message = reader.ReadString();
                     if (id != _pendingId || reader.BaseStream.Position != reader.BaseStream.Length) return;
-                    if (_nonce == null) { if (!ok || nonce.Length != 32 || sequence != 0) return; _nonce = nonce; }
+                    if (_nonce == null)
+                    {
+                        if (sequence != 0) return;
+                        if (!ok)
+                        {
+                            _pendingId = _pendingPayload = null;
+                            ClientQueue.Clear();
+                            if (Mod.Config?.VeinMiningShowMessages == true && !string.IsNullOrEmpty(message)) Main.NewText(message, 255, 180, 100);
+                            return;
+                        }
+                        if (nonce.Length != 32) return;
+                        _nonce = nonce;
+                    }
                     else if (nonce != _nonce || sequence != _sequence) return;
                     _pendingId = _pendingPayload = null;
 

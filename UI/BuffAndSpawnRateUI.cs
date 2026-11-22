@@ -323,7 +323,8 @@ namespace QualityOfTerraria.UI
             {
                 if (Main.netMode == 1)
                 {
-                    ToolNetwork.Request("world-toggle", -1, control, state ? 0 : 1);
+                    if (!NetSync.LocalPlayerIsAdmin) Main.NewText("只有房主或管理员可以调整节日和世界状态", 255, 180, 100);
+                    else ToolNetwork.Request("world-toggle", -1, control, state ? 0 : 1);
                 }
                 else onToggle?.Invoke();
                 UIRenderer.ConsumeClick();

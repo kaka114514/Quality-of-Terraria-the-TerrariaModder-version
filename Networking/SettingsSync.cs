@@ -13,9 +13,11 @@ namespace QualityOfTerraria.Networking
     internal static class SettingsSync
     {
         private const string Prefix = "qot.settings.";
-        private const string Version = "1.2.9";
+        private const string Version = "1.2.11";
         private const int MaxRequests = 16;
-        private static string _clientNonce, _room;
+        private const string AwaitingApply = "已同意，等待服务器核验";
+        private static string _clientNonce, _room, _pendingCreate;
+        private static DateTime _createExpires;
         private static int _lifecycle, _helloFrames;
         private static Dictionary<string, object> _lastPersonal;
         private static ConfigPropertyMeta _blacklistMetadata;
@@ -47,7 +49,7 @@ namespace QualityOfTerraria.Networking
         }
         private sealed class Proposal
         {
-            internal string Id, SourceConnection, Name;
+            internal string Id, CreateId, SourceConnection, Name;
             internal int Source;
             internal DateTime Expires;
             internal Dictionary<string, object> Snapshot;
@@ -87,6 +89,11 @@ namespace QualityOfTerraria.Networking
             if (!Mod.WorldActive) return;
             if (Main.netMode == 1 && ++_helloFrames >= (_room == null ? 180 : 600)) { _helloFrames = 0; Hello(); }
             if (Main.netMode == 1 && _room != null) SendPersonalChanges();
+            if (_pendingCreate != null && DateTime.UtcNow >= _createExpires)
+            {
+                _pendingCreate = null;
+                Status = "未收到服务器的同步申请回执";
+            }
             if (Main.netMode == 2)
             {
                 foreach (var pair in Peers.ToArray())
@@ -107,13 +114,13 @@ namespace QualityOfTerraria.Networking
                 }
             }
             foreach (var row in Rows)
-                if (row.Pending && DateTime.UtcNow >= row.Expires) { row.Pending = false; row.State = "申请超时失效"; }
+                if ((row.Pending || row.State == AwaitingApply) && DateTime.UtcNow >= row.Expires) { row.Pending = false; row.State = "申请超时失效"; }
         }
 
         internal static void ResetSession()
         {
             _lifecycle++;
-            _room = _clientNonce = null;
+            _room = _clientNonce = _pendingCreate = null;
             _helloFrames = 0;
             _lastPersonal = null;
             Peers.Clear(); Proposals.Clear(); Rows.Clear(); Applying.Clear();
@@ -176,19 +183,23 @@ namespace QualityOfTerraria.Networking
         internal static void RequestSync()
         {
             if (Main.netMode != 1 || _room == null) { Status = "请在联机房间等待设置服务连接完成"; return; }
+            if (_pendingCreate != null) return;
             if (!ConfigProfiles.SaveLast()) { Status = "无法将当前设置保存到“上一次”，同步申请未发送"; return; }
             var snapshot = Metadata().ToDictionary(p => p.Key, p => p.GetValue(Mod.Config), StringComparer.Ordinal);
             string error;
             if (!ValidateSnapshot(snapshot, out error)) { Status = error; return; }
-            NetSyncPayload.SendRequest(Prefix + "create", Write(w => { Header(w); WriteSnapshot(w, snapshot); }));
-            Status = "申请已发送，等待其他玩家同意";
+            string id = Guid.NewGuid().ToString("N");
+            _pendingCreate = id;
+            _createExpires = DateTime.UtcNow.AddSeconds(10);
+            Status = "等待服务器受理同步申请";
+            NetSyncPayload.SendRequest(Prefix + "create", Write(w => { Header(w); w.Write(id); WriteSnapshot(w, snapshot); }));
         }
 
         internal static void Decide(RequestRow row, bool approve)
         {
             if (!row.Incoming || !row.Pending || _room == null) return;
             row.Pending = false;
-            row.State = approve ? "已同意，等待服务器核验" : "已拒绝";
+            row.State = approve ? AwaitingApply : "已拒绝";
             NetSyncPayload.SendRequest(Prefix + "decision", Write(w => { Header(w); w.Write(row.Id); w.Write(approve); }));
         }
 
@@ -243,19 +254,26 @@ namespace QualityOfTerraria.Networking
         private static void HandleRequest(int slot, string operation, string payload)
         {
             if (Main.netMode != 2 || !Active(slot)) return;
+            string nonce = null, createId = null;
+            bool hello = operation == Prefix + "hello";
             try
             {
                 using (var reader = Read(payload))
                 {
-                    if (reader.ReadString() != Version) { Reject(slot, "设置同步协议不一致，请让房主、服务器和所有玩家更新为同一修复构建"); return; }
-                    string nonce = reader.ReadString();
+                    string version = reader.ReadString();
+                    nonce = reader.ReadString();
                     if (!Nonce(nonce)) return;
-                    if (operation == Prefix + "hello")
+                    if (version != Version)
+                    {
+                        if (hello) RejectHello(slot, nonce, "设置同步协议不一致，请让房主、服务器和所有玩家更新为同一版本");
+                        return;
+                    }
+                    if (hello)
                     {
                         var personal = ReadPersonalConfig(ReadSnapshot(reader));
                         End(reader);
                         string identity = PermissionService.GetGuid(slot);
-                        if (string.IsNullOrEmpty(identity)) { Reject(slot, "玩家身份尚未就绪"); return; }
+                        if (string.IsNullOrEmpty(identity)) { RejectHello(slot, nonce, "玩家身份尚未就绪，正在重连设置服务"); return; }
                         Peer old;
                         if (!Peers.TryGetValue(slot, out old) || old.Identity != identity || old.Nonce != nonce)
                         {
@@ -267,14 +285,20 @@ namespace QualityOfTerraria.Networking
                         return;
                     }
                     Peer peer;
+                    string room = reader.ReadString();
                     if (!Peers.TryGetValue(slot, out peer) || peer.Nonce != nonce || peer.Identity != PermissionService.GetGuid(slot)
-                        || reader.ReadString() != _room) { Reject(slot, "身份或房间会话已失效"); return; }
+                        || room != _room) { RejectHello(slot, nonce, "设置会话已失效，正在重连"); return; }
                     if (operation == Prefix + "personal")
                     {
                         var personal = ReadPersonalConfig(ReadSnapshot(reader)); End(reader);
                         peer.Personal = personal;
                     }
-                    else if (operation == Prefix + "create") Create(slot, peer, ReadSnapshot(reader), reader);
+                    else if (operation == Prefix + "create")
+                    {
+                        createId = reader.ReadString();
+                        if (!Nonce(createId)) return;
+                        Create(slot, peer, createId, ReadSnapshot(reader), reader);
+                    }
                     else if (operation == Prefix + "decision")
                     {
                         string id = reader.ReadString(); bool approve = reader.ReadBoolean(); End(reader);
@@ -295,23 +319,35 @@ namespace QualityOfTerraria.Networking
                 }
             }
             catch (Exception ex) when (ex is IOException || ex is FormatException || ex is ArgumentException || ex is OverflowException)
-            { Reject(slot, "申请数据格式无效"); }
+            {
+                const string reason = "申请数据格式无效";
+                if (hello && Nonce(nonce)) RejectHello(slot, nonce, reason);
+                else if (Nonce(createId)) SendCreateResult(slot, createId, false, reason);
+                else Reject(slot, reason);
+            }
         }
 
-        private static void Create(int slot, Peer peer, Dictionary<string, object> snapshot, BinaryReader reader)
+        private static void Create(int slot, Peer peer, string id, Dictionary<string, object> snapshot, BinaryReader reader)
         {
             End(reader);
+            var previous = Proposals.Values.FirstOrDefault(p => p.SourceConnection == peer.Connection && p.CreateId == id);
+            if (previous != null)
+            {
+                SendCreateResult(slot, id, true, "服务器已受理，等待 " + previous.Targets.Count + " 名玩家回应");
+                return;
+            }
             string error;
-            if (!ValidateSnapshot(snapshot, out error)) { Reject(slot, error); return; }
+            if (!ValidateSnapshot(snapshot, out error)) { SendCreateResult(slot, id, false, error); return; }
             if (Proposals.Count >= MaxRequests || Proposals.Values.Count(p => p.SourceConnection == peer.Connection) >= 2)
-            { Reject(slot, "待处理申请过多，请等待已有申请完成"); return; }
-            var proposal = new Proposal { Id = Guid.NewGuid().ToString("N"), Source = slot, SourceConnection = peer.Connection,
+            { SendCreateResult(slot, id, false, "待处理申请过多，请等待已有申请完成"); return; }
+            var proposal = new Proposal { Id = Guid.NewGuid().ToString("N"), CreateId = id, Source = slot, SourceConnection = peer.Connection,
                 Name = Main.player[slot].name, Snapshot = snapshot, Expires = DateTime.UtcNow.AddMinutes(2) };
             foreach (var pair in Peers)
                 if (pair.Key != slot && Matches(pair.Key, pair.Value.Connection))
                     proposal.Targets.Add(new Target { Slot = pair.Key, Connection = pair.Value.Connection, Name = Main.player[pair.Key].name });
-            if (proposal.Targets.Count == 0) { Reject(slot, "没有已连接同版本设置服务的其他玩家"); return; }
+            if (proposal.Targets.Count == 0) { SendCreateResult(slot, id, false, "没有已连接同版本设置服务的其他玩家"); return; }
             Proposals.Add(proposal.Id, proposal);
+            SendCreateResult(slot, id, true, "服务器已受理，等待 " + proposal.Targets.Count + " 名玩家回应");
             Mod.LogInfo($"设置同步申请：玩家 {slot} 向 {proposal.Targets.Count} 名玩家发送申请。");
             foreach (var target in proposal.Targets)
             {
@@ -361,14 +397,24 @@ namespace QualityOfTerraria.Networking
             {
                 using (var reader = Read(payload))
                 {
-                    if (reader.ReadString() != Version || reader.ReadString() != _clientNonce) return;
+                    string version = reader.ReadString();
+                    if (reader.ReadString() != _clientNonce) return;
+                    if (operation == Prefix + "hello-error")
+                    {
+                        string reason = reader.ReadString(); End(reader);
+                        Status = reason;
+                        _room = _pendingCreate = null;
+                        _helloFrames = 0;
+                        return;
+                    }
+                    if (version != Version) return;
                     string room = reader.ReadString();
                     if (operation == Prefix + "hello")
                     {
                         End(reader); if (!Nonce(room)) return;
                         if (_room != room)
                         {
-                            Rows.Clear(); Applying.Clear(); _lastPersonal = null;
+                            Rows.Clear(); Applying.Clear(); _lastPersonal = null; _pendingCreate = null;
                             Status = "设置服务已连接，可发送同步申请";
                         }
                         _room = room; return;
@@ -377,7 +423,12 @@ namespace QualityOfTerraria.Networking
                     if (operation == Prefix + "error") { Status = reader.ReadString(); End(reader); return; }
                     string id = reader.ReadString();
                     if (!Nonce(id)) return;
-                    if (operation == Prefix + "offer")
+                    if (operation == Prefix + "created")
+                    {
+                        string result = reader.ReadString(); End(reader);
+                        if (id == _pendingCreate) { _pendingCreate = null; Status = result; }
+                    }
+                    else if (operation == Prefix + "offer")
                     {
                         string name = reader.ReadString(); var snapshot = ReadSnapshot(reader); End(reader);
                         string error;
@@ -392,7 +443,7 @@ namespace QualityOfTerraria.Networking
                         string worldResult = reader.ReadString(); var snapshot = ReadSnapshot(reader); End(reader);
                         if (!Applying.Add(id)) return;
                         // 服务器只对本连接已同意的申请发送 apply；本地也要求存在对应申请。
-                        var row = Rows.FirstOrDefault(r => r.Id == id && r.Incoming && !r.Pending && r.State == "已同意，等待服务器核验");
+                        var row = Rows.FirstOrDefault(r => r.Id == id && r.Incoming && !r.Pending && r.State == AwaitingApply);
                         if (row == null) { Applying.Remove(id); return; }
                         string result = ApplyPersonal(snapshot) + "；" + worldResult;
                         Mod.LogInfo("设置同步应用结果：" + result);
@@ -519,6 +570,13 @@ namespace QualityOfTerraria.Networking
             Mod.LogInfo($"设置同步拒绝玩家 {slot} 的请求：{reason}");
             if (Peers.ContainsKey(slot)) Send(slot, "error", w => w.Write(reason), false);
         }
+        private static void RejectHello(int slot, string nonce, string reason)
+        {
+            Mod.LogInfo($"设置服务拒绝玩家 {slot}：{reason}");
+            NetSyncPayload.SendResponseTo(slot, false, Prefix + "hello-error", Write(w => { w.Write(Version); w.Write(nonce); w.Write(reason); }));
+        }
+        private static void SendCreateResult(int slot, string id, bool ok, string result)
+            => Send(slot, "created", w => { w.Write(id); w.Write(result); }, ok);
         private static void Send(int slot, string operation, Action<BinaryWriter> body, bool ok = true)
         {
             Peer peer;

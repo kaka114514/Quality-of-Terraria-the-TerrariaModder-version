@@ -24,6 +24,8 @@ namespace QualityOfTerraria.Networking
         private static readonly Dictionary<string, Partial> Responses = new Dictionary<string, Partial>();
         private static long _nextId;
 
+        internal static bool CanSend(string payload) => payload != null && payload.Length <= MaxPayloadChars;
+
         internal static void SendRequest(string operation, string payload)
             => Send(payload, part => NetSync.SendStorageRequest(operation, part));
 
@@ -38,7 +40,7 @@ namespace QualityOfTerraria.Networking
                 send(payload);
                 return;
             }
-            if (payload.Length > MaxPayloadChars) throw new ArgumentException("网络载荷过大");
+            if (!CanSend(payload)) throw new ArgumentException("网络载荷过大");
             string id = (++_nextId).ToString("x") + Guid.NewGuid().ToString("N").Substring(0, 8);
             int total = (payload.Length + ChunkChars - 1) / ChunkChars;
             if (total > MaxChunks) throw new ArgumentException("网络载荷分片过多");
